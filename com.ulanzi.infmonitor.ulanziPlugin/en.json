@@ -1,0 +1,25 @@
+{
+  "Name": "Inference Monitor",
+  "Description": "Live usage limits and balances for your inference providers, with a Provider Switch key to cycle them.",
+  "Actions": [
+    { "Name": "Provider Tile", "Tooltip": "Show a limit/balance metric of the active provider — place one Primary and one Secondary" },
+    { "Name": "Provider Switch", "Tooltip": "Cycle the active provider — the Provider Tiles follow it" }
+  ],
+  "Localization": {
+    "Slot": "Shows",
+    "Primary": "Primary (session / balance)",
+    "Secondary": "Secondary (week / spend)",
+    "Display": "Display",
+    "Theme": "Theme",
+    "Dark": "Dark",
+    "Light": "Light",
+    "Refresh": "Refresh",
+    "5 sec": "5 sec",
+    "10 sec": "10 sec",
+    "30 sec": "30 sec",
+    "Agent": "Agent",
+    "Agent address": "Agent address",
+    "TileHint": "Place TWO Provider Tiles next to a Provider Switch: set one to Primary and one to Secondary. They render whichever provider the switch has selected — session/week % for Claude & Ollama Cloud, balance & spend for OpenRouter & Nous.",
+    "SwitchHint": "Run inf-agent on the host that holds your provider keys (see the project README) and enter its address, e.g. http://100.x.y.z:9890 over Tailscale. Pressing this key cycles the active provider; the Provider Tiles follow it."
+  }
+}

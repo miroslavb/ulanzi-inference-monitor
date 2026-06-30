@@ -1,0 +1,69 @@
+{
+  "Author": "Miroslav Babitski",
+  "Name": "Inference Monitor",
+  "Description": "Live usage limits and balances for your inference providers, drawn on your deck keys. A Provider Switch key cycles the active provider; two tiles show its session/weekly limits (Claude, Ollama Cloud) or balance/spend (OpenRouter, Nous). Data comes from a small inf-agent running on the host that holds your credentials.",
+  "Icon": "assets/icons/pluginIcon.png",
+  "Version": "1.0.0",
+  "Category": "Inference Monitor",
+  "CategoryIcon": "assets/icons/categoryIcon.png",
+  "CodePath": "plugin/app.js",
+  "Type": "JavaScript",
+  "Inspect": "--inspect=127.0.0.1:9235",
+  "PrivateAPI": true,
+  "UUID": "com.ulanzi.ulanzistudio.infmonitor",
+  "Actions": [
+    {
+      "Name": "Provider Tile",
+      "Icon": "assets/icons/monitor.png",
+      "PropertyInspectorPath": "property-inspector/inspector.html",
+      "state": 0,
+      "States": [
+        {
+          "Name": "Tile",
+          "Image": "assets/icons/monitor.png"
+        }
+      ],
+      "Tooltip": "Show a limit/balance metric of the active provider — place one as Primary and one as Secondary",
+      "UUID": "com.ulanzi.ulanzistudio.infmonitor.tile",
+      "SupportedInMultiActions": false,
+      "DisableAutomaticStates": true,
+      "Controllers": [
+        "Keypad"
+      ],
+      "Devices": []
+    },
+    {
+      "Name": "Provider Switch",
+      "Icon": "assets/icons/monitor.png",
+      "PropertyInspectorPath": "property-inspector/switcher.html",
+      "state": 0,
+      "States": [
+        {
+          "Name": "Switch",
+          "Image": "assets/icons/monitor.png"
+        }
+      ],
+      "Tooltip": "Cycle the active provider — the Provider Tiles follow it",
+      "UUID": "com.ulanzi.ulanzistudio.infmonitor.provswitch",
+      "SupportedInMultiActions": false,
+      "DisableAutomaticStates": true,
+      "Controllers": [
+        "Keypad"
+      ],
+      "Devices": []
+    }
+  ],
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    },
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.13"
+    }
+  ],
+  "Software": {
+    "MinVersion": "2.1.4"
+  }
+}

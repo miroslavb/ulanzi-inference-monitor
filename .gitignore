@@ -1,0 +1,10 @@
+dist/
+**/node_modules/
+*.log
+.DS_Store
+ws-port.js
+__pycache__/
+*.pyc
+.disk-guard.yaml
+test/preview.html
+agent/*.run.log

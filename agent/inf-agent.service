@@ -1,0 +1,25 @@
+[Unit]
+Description=Ulanzi Inference Monitor agent (provider limits/balances for the Ulanzi Deck plugin)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/inf-agent/inf-agent.py
+Environment=INF_AGENT_PORT=9890
+# Optional hardening — bind only to the Tailscale IP and/or require a token:
+# Environment=INF_AGENT_BIND=100.x.y.z
+# Environment=INF_AGENT_TOKEN=change-me
+# Credential paths default to this box; override if yours differ:
+# Environment=INF_CLAUDE_CREDS=/root/.claude/.credentials.json
+# Environment=INF_HERMES_ENV=/root/.hermes/.env
+# Environment=INF_HERMES_CONFIG=/root/.hermes/config.yaml
+# Environment=INF_NOUS_PORTAL=/root/.hermes/nous-portal.json
+Restart=on-failure
+RestartSec=5
+# NOTE: the agent reads credential files under /root (.claude, .hermes), so it
+# runs as root here. Do NOT add DynamicUser=yes unless you also point the
+# INF_* paths at files that user can read.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

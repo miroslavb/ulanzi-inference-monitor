@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,minimal-ui,viewport-fit=cover" />
+  <title>Provider Tile</title>
+  <link rel="stylesheet" href="../libs/css/uspi.css">
+  <style>
+    .uspi-item-label { width: 120px; }
+    .hint { padding: 6px 12px 10px; color: #9aa0a6; font-size: 11px; line-height: 1.5; }
+    .hint b, .hint code { color: #cfcfcf; }
+    #property-inspector input[type="text"] {
+      background: #2b2b2b; color: #e8e8e8; border: 1px solid #6b6b6b;
+      border-radius: 4px; height: 28px; padding: 0 8px; box-sizing: border-box; font-size: 13px;
+    }
+    #property-inspector input[type="text"]::placeholder { color: #7a7f85; }
+  </style>
+</head>
+<body>
+  <div class="uspi-wrapper hidden">
+    <form id="property-inspector" onsubmit="return false;">
+
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="Slot">Shows</div>
+        <select class="uspi-item-value select" id="slot">
+          <option value="primary" selected data-localize="Primary">Primary (session / balance)</option>
+          <option value="secondary" data-localize="Secondary">Secondary (week / spend)</option>
+        </select>
+      </div>
+
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="Theme">Theme</div>
+        <select class="uspi-item-value select" id="theme">
+          <option value="dark" selected data-localize="Dark">Dark</option>
+          <option value="light" data-localize="Light">Light</option>
+        </select>
+      </div>
+
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="Refresh">Refresh</div>
+        <select class="uspi-item-value select" id="refresh">
+          <option value="5000" selected data-localize="5 sec">5 sec</option>
+          <option value="10000" data-localize="10 sec">10 sec</option>
+          <option value="30000" data-localize="30 sec">30 sec</option>
+        </select>
+      </div>
+
+      <div class="uspi-heading" data-localize="Agent">Agent</div>
+      <div class="uspi-item">
+        <div class="uspi-item-label" data-localize="Agent address">Agent address</div>
+        <input class="uspi-item-value" type="text" id="agentUrl" placeholder="http://127.0.0.1:9890">
+      </div>
+
+      <div class="hint" data-localize="TileHint">
+        Place TWO <b>Provider Tiles</b> next to a <b>Provider Switch</b>: set one to
+        <b>Primary</b> and one to <b>Secondary</b>. They render whichever provider the
+        switch selected — session/week % for Claude &amp; Ollama Cloud, balance &amp; spend
+        for OpenRouter &amp; Nous.
+      </div>
+
+    </form>
+  </div>
+
+  <script src="../libs/js/constants.js"></script>
+  <script src="../libs/js/eventEmitter.js"></script>
+  <script src="../libs/js/timers.js"></script>
+  <script src="../libs/js/utils.js"></script>
+  <script src="../libs/js/ulanziApi.js"></script>
+  <script src="./inspector.js"></script>
+</body>
+</html>

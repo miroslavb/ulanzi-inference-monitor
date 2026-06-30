@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 144" width="144" height="144">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#17a2d6" stop-opacity="0.65"/>
+    <stop offset="1" stop-color="#17a2d6" stop-opacity="0.05"/></linearGradient></defs>
+  <rect x="8" y="8" width="128" height="128" rx="16" fill="#1b1b1b"/>
+  <g stroke="#333" stroke-width="2">
+    <line x1="8" y1="48" x2="136" y2="48"/><line x1="8" y1="80" x2="136" y2="80"/><line x1="8" y1="112" x2="136" y2="112"/>
+    <line x1="40" y1="8" x2="40" y2="136"/><line x1="72" y1="8" x2="72" y2="136"/><line x1="104" y1="8" x2="104" y2="136"/>
+  </g>
+  <path d="M8 108 L24 96 L40 104 L56 72 L72 84 L88 44 L104 64 L120 36 L136 52 L136 136 L8 136 Z" fill="url(#g)"/>
+  <path d="M8 108 L24 96 L40 104 L56 72 L72 84 L88 44 L104 64 L120 36 L136 52" fill="none" stroke="#17a2d6" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+  <rect x="8" y="8" width="128" height="128" rx="16" fill="none" stroke="#3a3a3a" stroke-width="2"/>
+</svg>

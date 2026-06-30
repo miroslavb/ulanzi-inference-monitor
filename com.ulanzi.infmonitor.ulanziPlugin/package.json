@@ -1,0 +1,11 @@
+{
+  "name": "com.ulanzi.infmonitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ulanzi Deck plugin: live inference-provider usage limits & balances (Claude, OpenRouter, Nous, Ollama Cloud), with a Provider Switch key.",
+  "type": "module",
+  "main": "plugin/app.js",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
