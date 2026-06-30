@@ -78,13 +78,14 @@ without a switch — the most recently configured address wins.)
   until Claude Code refreshes.
 - **Ollama Cloud** exposes no per-window usage via any API, so its limit tiles show
   plan + renewal date rather than a session/week %.
-- **Nous** rate limits/tier come from the portal JWT (no network call). The hermes
-  portal token is the *agent's free-tier* identity, so the agent never infers "Free"
-  from it and **never refreshes it** (Nous refresh tokens are single-use; reuse revokes
-  the whole session — only hermes may rotate them). Your real plan + purchased balance
-  come from `INF_NOUS_PLAN` / `INF_NOUS_BALANCE` (authoritative), or the live
-  `GET /api/oauth/account` *only when a valid token exists*. Update the balance env when
-  it changes, or `hermes auth add nous` to restore a live session.
+- **Nous** rate limits/tier come from the portal JWT (no network call). Real plan +
+  purchased balance are read **live** from the portal account API by delegating to
+  hermes's own `get_nous_portal_account_info()` (run in the hermes venv) — hermes owns
+  the single-use token refresh + persistence + locking, so the agent **never** calls the
+  Nous refresh endpoint itself (reuse revokes the whole session). Configure via
+  `INF_NOUS_HELPER_PY` / `INF_NOUS_HELPER_CWD` (defaults point at this box's hermes), cached
+  `INF_NOUS_LIVE_TTL` (300s). If hermes has no Nous session, it falls back to the
+  `INF_NOUS_PLAN` / `INF_NOUS_BALANCE` env values; restore live with `hermes auth add nous`.
 - **Dialagram** is intentionally not included (no balance API; subscription
   inactive). Add providers by extending `agent/inf-agent.py` (`PROBES`).
 - Secure the agent with `INF_AGENT_TOKEN` and/or bind it to your Tailscale IP if the

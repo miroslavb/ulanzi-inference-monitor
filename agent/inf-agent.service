@@ -14,10 +14,12 @@ Environment=INF_AGENT_PORT=9890
 # Environment=INF_HERMES_ENV=/root/.hermes/.env
 # Environment=INF_HERMES_CONFIG=/root/.hermes/config.yaml
 # Environment=INF_NOUS_PORTAL=/root/.hermes/nous-portal.json
-# Nous personal plan/balance overrides — the hermes portal token is the agent's
-# free-tier identity and the live balance API is not reachable without a valid
-# Nous session (and the agent must never refresh that token), so set your portal
-# values here. Update the balance when it changes, or re-auth `hermes auth add nous`.
+# Nous: live plan/balance is read via hermes's own account API helper (it owns the
+# single-use token refresh). Defaults assume hermes lives on this box:
+# Environment=INF_NOUS_HELPER_PY=/root/.hermes/hermes-agent/venv/bin/python
+# Environment=INF_NOUS_HELPER_CWD=/root/.hermes/hermes-agent
+# Environment=INF_NOUS_LIVE_TTL=300
+# Fallbacks used only if hermes has no Nous session (then run `hermes auth add nous`):
 # Environment=INF_NOUS_PLAN=Plus
 # Environment=INF_NOUS_BALANCE=19.10
 Restart=on-failure

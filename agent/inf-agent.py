@@ -38,6 +38,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import threading
 import time
 import urllib.request
@@ -251,16 +252,57 @@ def probe_openrouter():
     return p
 
 
+# Live Nous plan/balance comes from the user's portal account API, which needs a
+# valid token. We must NEVER refresh the Nous token ourselves (single-use; reuse →
+# full session revocation; only hermes may rotate it). So we delegate to hermes's
+# OWN `get_nous_portal_account_info()` by running it in hermes's venv — that path
+# refreshes + persists the rotation correctly (same code + lock the gateway uses).
+NOUS_HELPER_PY = os.environ.get("INF_NOUS_HELPER_PY", "/root/.hermes/hermes-agent/venv/bin/python")
+NOUS_HELPER_CWD = os.environ.get("INF_NOUS_HELPER_CWD", "/root/.hermes/hermes-agent")
+NOUS_LIVE_TTL = max(60, int(os.environ.get("INF_NOUS_LIVE_TTL", "300")))
+
+_NOUS_HELPER_SRC = (
+    "import json\n"
+    "from hermes_cli.nous_account import get_nous_portal_account_info\n"
+    "i=get_nous_portal_account_info(force_fresh=True)\n"
+    "s=i.subscription; p=i.paid_service_access_info\n"
+    "b=None\n"
+    "if p is not None and getattr(p,'total_usable_credits',None) is not None: b=p.total_usable_credits\n"
+    "elif s is not None and getattr(s,'credits_remaining',None) is not None: b=s.credits_remaining\n"
+    "print(json.dumps({'logged_in':i.logged_in,'paid':i.paid_service_access,"
+    "'plan':getattr(s,'plan',None),'tier':getattr(s,'tier',None),'balance':b,"
+    "'monthly':getattr(s,'monthly_credits',None),'error':(str(i.error) if i.error else None)}))\n"
+)
+_nous_live = {"data": None, "ts": 0.0}
+
+
+def _nous_account_live():
+    """Live plan/balance via hermes's sanctioned account path (cached NOUS_LIVE_TTL).
+    Returns a dict or None. hermes owns the refresh/persist/locking — this is the
+    only safe way to read the real balance. Falls back to the last good live data."""
+    if not os.path.exists(NOUS_HELPER_PY):
+        return None
+    if _nous_live["data"] is not None and (time.time() - _nous_live["ts"]) < NOUS_LIVE_TTL:
+        return _nous_live["data"]
+    try:
+        r = subprocess.run([NOUS_HELPER_PY, "-c", _NOUS_HELPER_SRC], cwd=NOUS_HELPER_CWD,
+                           capture_output=True, text=True, timeout=45)
+        line = next((ln for ln in reversed(r.stdout.splitlines()) if ln.strip().startswith("{")), "")
+        data = json.loads(line) if line else None
+        if data and data.get("logged_in") and not data.get("error"):
+            _nous_live["data"] = data
+            _nous_live["ts"] = time.time()
+            return data
+    except Exception:
+        pass
+    return _nous_live["data"]  # last good live, if any
+
+
 def probe_nous():
-    # NOTE on identity: the hermes nous-portal.json token is the *hermes-agent*
-    # free-tier OAuth token (product nous-hermes-agent, rate_limit_source
-    # free_hermes_agent) — NOT your personal portal subscription. Its JWT always
-    # says paid_access:false, so we must NOT infer "Free" from it. The real plan &
-    # purchased balance live behind GET /api/oauth/account, which needs a *valid*
-    # token. We must NEVER call the refresh endpoint: Nous refresh tokens are
-    # single-use and only hermes may rotate them (reuse → full session revocation).
-    # So: env overrides (authoritative) > live account API (only if token unexpired)
-    # > rate limits / unknown. Never refresh.
+    # The nous-portal.json JWT is the hermes-agent *free-tier* identity — never
+    # infer "Free" / balance from it. Real plan + purchased balance come from the
+    # live account API (via hermes, see _nous_account_live). Precedence:
+    # live > INF_NOUS_* env fallback > rate-limits/unknown.
     p = {"id": "nous", "name": "Nous", "kind": "balance", "icon": "chip",
          "currency": "USD", "ok": False}
     claims, token = {}, None
@@ -280,42 +322,27 @@ def probe_nous():
     if claims.get("iat"):
         p["token_age_min"] = round((time.time() - float(claims["iat"])) / 60, 1)
 
-    # Live account API — ONLY when the existing token is still valid (never refresh).
-    live = None
-    exp = claims.get("exp")
-    if token and exp and float(exp) > time.time() + 30:
-        try:
-            acct = _http("GET", "https://portal.nousresearch.com/api/oauth/account",
-                         {"Authorization": "Bearer " + token, "Accept": "application/json"})
-            sub = acct.get("subscription") or {}
-            psa = acct.get("paid_service_access") or {}
-            live = {
-                "plan": sub.get("plan"),
-                "tier": sub.get("tier"),
-                "balance": _first_num(psa.get("total_usable_credits"),
-                                      psa.get("purchased_credits_remaining"),
-                                      sub.get("credits_remaining")),
-                "paid": psa.get("allowed", psa.get("paid_access")),
-            }
-        except Exception:
-            live = None
+    live = _nous_account_live()
+    p["live"] = bool(live)
 
-    # Resolve plan + balance: env override (authoritative) > live > unknown.
     plan_env = os.environ.get("INF_NOUS_PLAN", "").strip()
-    bal = _first_num(os.environ.get("INF_NOUS_BALANCE", "").strip().lstrip("$"))
-    if plan_env:
-        p["plan"] = plan_env
-    elif live and live.get("plan"):
+    bal_env = _first_num(os.environ.get("INF_NOUS_BALANCE", "").strip().lstrip("$"))
+
+    # plan: live > env
+    if live and live.get("plan"):
         p["plan"] = live["plan"]
-    if bal is None and live and live.get("balance") is not None:
-        bal = live["balance"]
+    elif plan_env:
+        p["plan"] = plan_env
+    # balance: live > env
+    bal = live.get("balance") if (live and live.get("balance") is not None) else bal_env
     if bal is not None:
         p["balance"] = round(float(bal), 2)
     if live and live.get("tier") is not None:
         p["tier"] = live["tier"]
+    if live and live.get("monthly") is not None:
+        p["monthly_credits"] = live["monthly"]
 
-    # Only mark FREE with positive evidence from the live account API — never from
-    # the stale agent JWT.
+    # Only mark FREE on positive live evidence (never from the stale agent JWT).
     p["free"] = bool(live and live.get("paid") is False and not p.get("plan") and "balance" not in p)
 
     if "balance" in p:
@@ -327,10 +354,10 @@ def probe_nous():
     else:
         p["headline"] = "Nous"
 
-    if not token:
-        p["error"] = "no portal token (hermes Nous logged out)"
-        return p
-    p["ok"] = True
+    if live or "balance" in p or token:
+        p["ok"] = True
+    else:
+        p["error"] = "Nous not logged in (run: hermes auth add nous) and no INF_NOUS_* override"
     return p
 
 

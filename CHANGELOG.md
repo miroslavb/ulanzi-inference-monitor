@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+
+- **Live Nous balance & plan (agent).** The agent now reads the real portal
+  subscription + purchased credits (e.g. **Plus / $18.93 / $22-mo**) by delegating
+  to hermes's own `get_nous_portal_account_info()` run in the hermes venv — the
+  sanctioned path that refreshes + persists the single-use token with hermes's
+  locking (the agent still NEVER calls the refresh endpoint itself). Cached
+  `INF_NOUS_LIVE_TTL` (default 300s). Precedence: live > `INF_NOUS_*` env fallback >
+  rate-limits. New env: `INF_NOUS_HELPER_PY`, `INF_NOUS_HELPER_CWD`, `INF_NOUS_LIVE_TTL`.
+  (Plugin unchanged from 1.1.0 — this is an agent-only release; the bundled plugin
+  zip is bumped for version parity.)
+
 ## 1.1.0
 
 Bug-fix release from on-device feedback.

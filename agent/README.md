@@ -61,6 +61,10 @@ portal JWT (no network call).
 | `INF_HERMES_CONFIG` | `/root/.hermes/config.yaml` | hermes config (Ollama key fallback) |
 | `INF_NOUS_PORTAL` | `/root/.hermes/nous-portal.json` | Nous portal token |
 | `OPENROUTER_API_KEY` / `OLLAMA_API_KEY` | – | explicit key overrides (win over file discovery) |
+| `INF_NOUS_HELPER_PY` | `/root/.hermes/hermes-agent/venv/bin/python` | hermes venv python used for the live Nous account fetch |
+| `INF_NOUS_HELPER_CWD` | `/root/.hermes/hermes-agent` | working dir for the helper import |
+| `INF_NOUS_LIVE_TTL` | `300` | seconds to cache the live Nous account fetch |
+| `INF_NOUS_PLAN` / `INF_NOUS_BALANCE` | – | Nous plan/balance fallback when hermes has no live session |
 
 ## Where the numbers come from
 
@@ -68,7 +72,7 @@ portal JWT (no network call).
 |----------|--------|-------|
 | **Claude** | `GET api.anthropic.com/api/oauth/usage` + `/profile` (Bearer = Claude Code OAuth token) | `five_hour.utilization` → session %, `seven_day.utilization` → week %, plus `resets_at`. The agent **reads** the token Claude Code keeps fresh and never refreshes it (so it can't clobber the credential file). On a `401` it reports `ok:false`. |
 | **OpenRouter** | `GET /api/v1/credits` + `/api/v1/key` | balance = `total_credits − total_usage`; spend from `usage_daily/weekly/monthly`. |
-| **Nous** | portal JWT claims (decoded locally) | `subscription_tier`, `member_spend_usd`, `rate_limit_*`. Free tier → no `$` balance. `token_age_min` surfaces staleness. |
+| **Nous** | rate limits/tier from portal JWT; plan + balance **live** via hermes's `get_nous_portal_account_info()` (run in the hermes venv) | hermes owns the single-use token refresh/persist/locking; the agent never calls the Nous refresh endpoint. Falls back to `INF_NOUS_PLAN`/`INF_NOUS_BALANCE` if hermes has no Nous session. |
 | **Ollama Cloud** | `POST ollama.com/api/me` | `Plan` + billing period (`SubscriptionPeriodEnd`). No usage API exists. |
 
 ## Install as a service (systemd)
