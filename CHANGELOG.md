@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.1.0
+
+Bug-fix release from on-device feedback.
+
+- **Ring gauge double segment (fix):** the progress arc used `stroke-dasharray`
+  with `pathLength="100"`, but the D200H's SVG renderer ignores `pathLength` — so
+  the normalised dash was read in real user units and tiled a spurious SECOND arc.
+  Now drawn as an explicit `<path … A …>` arc (one definite start/end), renderer-agnostic.
+- **Transient "usage HTTP 4xx" on tiles (fix):** the agent now keeps a per-provider
+  last-good cache. When a probe briefly fails — e.g. Claude's OAuth token 401s while
+  Claude Code rotates it — the tile shows the last good value marked `stale` (amber dot
+  on the switch key) instead of an error card. Only a never-succeeded provider shows an error.
+- **Nous showed "Free" (fix):** the hermes `nous-portal.json` token is the *hermes-agent
+  free-tier* identity (and was logged out/expired), so the old probe mislabeled the real
+  account as Free. The probe no longer infers "Free" from the stale JWT. Plan & balance now
+  come from `INF_NOUS_PLAN` / `INF_NOUS_BALANCE` overrides (authoritative) or the live
+  `GET /api/oauth/account` **only when a valid token exists**. The agent NEVER calls the Nous
+  refresh endpoint (single-use; only hermes may rotate it — reuse revokes the whole session).
+  The balance tile now shows the plan as its caption.
+
 ## 1.0.0
 
 Initial release — sibling of ulanzi-system-monitor for inference providers.

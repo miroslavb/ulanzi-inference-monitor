@@ -78,9 +78,13 @@ without a switch — the most recently configured address wins.)
   until Claude Code refreshes.
 - **Ollama Cloud** exposes no per-window usage via any API, so its limit tiles show
   plan + renewal date rather than a session/week %.
-- **Nous** is read from the portal JWT (tier, spend, rate limits) with no network
-  call; it's a free tier, so there is no `$` balance — the tiles show Free/tier and
-  rate limits.
+- **Nous** rate limits/tier come from the portal JWT (no network call). The hermes
+  portal token is the *agent's free-tier* identity, so the agent never infers "Free"
+  from it and **never refreshes it** (Nous refresh tokens are single-use; reuse revokes
+  the whole session — only hermes may rotate them). Your real plan + purchased balance
+  come from `INF_NOUS_PLAN` / `INF_NOUS_BALANCE` (authoritative), or the live
+  `GET /api/oauth/account` *only when a valid token exists*. Update the balance env when
+  it changes, or `hermes auth add nous` to restore a live session.
 - **Dialagram** is intentionally not included (no balance API; subscription
   inactive). Add providers by extending `agent/inf-agent.py` (`PROBES`).
 - Secure the agent with `INF_AGENT_TOKEN` and/or bind it to your Tailscale IP if the

@@ -58,18 +58,36 @@ function header(t, label) {
   return `<text x="50" y="14" text-anchor="middle" ${FAM} font-size="11" font-weight="700" letter-spacing="1" fill="${ACCENT}">${esc(label)}</text>`;
 }
 
+// Point on a circle at `deg` (0°=3 o'clock, +ve clockwise in SVG's y-down space).
+function polar(cx, cy, r, deg) {
+  const a = (deg * Math.PI) / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+
 // Centred ring gauge (0..100) with the value drawn in the middle.
+//
+// The progress arc is an explicit `<path … A …>` (NOT stroke-dasharray): the
+// D200H's SVG renderer ignores `pathLength`, so a normalised dasharray was being
+// read in real user units and tiled into a SECOND spurious arc segment. An arc
+// path has one definite start/end, so it renders identically everywhere.
 function ring(t, pct, centerText, centerColor, cy) {
   cy = cy || 56;
   const r = 29, sw = 8, len = Math.max(0, Math.min(100, pct));
   const col = centerColor || utilColor(len);
-  return (
-    `<circle cx="50" cy="${cy}" r="${r}" fill="none" stroke="${t.track}" stroke-width="${sw}"/>` +
-    `<circle cx="50" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="${sw}" ` +
-      `stroke-linecap="round" pathLength="100" stroke-dasharray="${len.toFixed(1)} 100" ` +
-      `transform="rotate(-90 50 ${cy})"/>` +
-    `<text x="50" y="${cy + 6}" text-anchor="middle" ${FAM} font-size="22" font-weight="800" fill="${col}">${esc(centerText)}</text>`
-  );
+  const track = `<circle cx="50" cy="${cy}" r="${r}" fill="none" stroke="${t.track}" stroke-width="${sw}"/>`;
+  let prog = '';
+  if (len >= 99.95) {
+    prog = `<circle cx="50" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="${sw}"/>`;
+  } else if (len > 0) {
+    const sweep = (len / 100) * 360;                 // clockwise from 12 o'clock
+    const [x0, y0] = polar(50, cy, r, -90);
+    const [x1, y1] = polar(50, cy, r, -90 + sweep);
+    const large = sweep > 180 ? 1 : 0;
+    prog = `<path d="M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}" ` +
+      `fill="none" stroke="${col}" stroke-width="${sw}" stroke-linecap="round"/>`;
+  }
+  return track + prog +
+    `<text x="50" y="${cy + 6}" text-anchor="middle" ${FAM} font-size="22" font-weight="800" fill="${col}">${esc(centerText)}</text>`;
 }
 
 // Big centred value with a small caption beneath it (value-card tiles).
@@ -125,11 +143,12 @@ function limitTile(t, p, slot) {
 
 function balanceTile(t, p, slot) {
   if (slot === 'primary') {
-    // Balance / credit headline.
+    // Balance / credit headline. Show the plan as the caption when known.
     let big, sub, color = t.text;
-    if (typeof p.balance === 'number') { big = money(p.balance); sub = 'balance'; color = p.balance <= 0 ? BAD : t.text; }
+    if (typeof p.balance === 'number') { big = money(p.balance); sub = p.plan || 'balance'; color = p.balance <= 0 ? BAD : t.text; }
     else if (p.free) { big = 'FREE'; sub = p.tier != null ? 'tier ' + p.tier : 'free tier'; color = GOOD; }
-    else { big = money(p.spend_total || 0); sub = 'spent'; }
+    else if (p.plan) { big = p.plan; sub = 'plan'; }
+    else { big = '—'; sub = truncate(p.name || '', 12); color = t.sub; }
     return header(t, 'BALANCE') + valueCard(t, big, sub, color);
   }
   // Secondary: spend today/week, or rate limits for a free provider with no $.
@@ -184,10 +203,11 @@ export function switchTileDataUri(o) {
   }
   const headline = head ? `<text x="${C / 2}" y="90" text-anchor="middle" ${FAM} font-size="13" font-weight="700" fill="${headColor}">${esc(truncate(head, 12))}</text>` : '';
 
-  // Cycle position, top-left; offline/error dot, top-right.
+  // Cycle position, top-left; status dot, top-right (red = offline/error, amber = stale).
   const idx = (o.count > 1) ? `<text x="6" y="14" ${FAM} font-size="10" font-weight="700" fill="${t.sub}">${(o.index | 0) + 1}/${o.count}</text>` : '';
   let corner = '';
   if (o.offline || p.ok === false) corner = `<circle cx="${C - 12}" cy="12" r="5" fill="${BAD}"/>`;
+  else if (p.stale) corner = `<circle cx="${C - 12}" cy="12" r="5" fill="${WARN}"/>`;
 
   return svg(bg + ringFrame + icon + name + headline + idx + corner);
 }

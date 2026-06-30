@@ -152,7 +152,22 @@ def _resets_in(iso):
     return f"{mnt}m"
 
 
+def _first_num(*vals):
+    """First value coercible to float, else None."""
+    for v in vals:
+        if v is None or v == "":
+            continue
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 # ---- provider probes -------------------------------------------------------
+_claude_profile = {"headline": None, "ts": 0.0}  # plan rarely changes → cache it
+
+
 def probe_claude():
     p = {"id": "claude", "name": "Claude", "kind": "limit", "icon": "robot", "ok": False}
     try:
@@ -164,18 +179,25 @@ def probe_claude():
         p["error"] = f"creds: {e}"
         return p
     hdr = {"Authorization": "Bearer " + tok, "anthropic-beta": "oauth-2025-04-20"}
-    try:
-        prof = _http("GET", "https://api.anthropic.com/api/oauth/profile", hdr)
-        tier = (prof.get("organization") or {}).get("rate_limit_tier", "")
-        m = re.search(r"max_(\d+)x", str(tier))  # "default_claude_max_20x" -> "Max 20x"
-        if m:
-            p["headline"] = f"Max {m.group(1)}x"
-    except Exception:
-        pass
+    # The shared OAuth rate limit on these endpoints 429s easily, so fetch the
+    # (static) plan headline from /profile at most hourly, not every cycle.
+    if _claude_profile["headline"] is None or (time.time() - _claude_profile["ts"]) > 3600:
+        try:
+            prof = _http("GET", "https://api.anthropic.com/api/oauth/profile", hdr)
+            tier = (prof.get("organization") or {}).get("rate_limit_tier", "")
+            m = re.search(r"max_(\d+)x", str(tier))  # "default_claude_max_20x" -> "Max 20x"
+            if m:
+                _claude_profile["headline"] = f"Max {m.group(1)}x"
+                _claude_profile["ts"] = time.time()
+        except Exception:
+            pass
+    p["headline"] = _claude_profile["headline"] or p.get("plan") or "Claude"
     try:
         u = _http("GET", "https://api.anthropic.com/api/oauth/usage", hdr)
     except urllib.error.HTTPError as e:
-        p["error"] = f"usage HTTP {e.code} (token may need refresh)"
+        p["error"] = ("rate limited (429)" if e.code == 429
+                      else f"token expired ({e.code})" if e.code in (401, 403)
+                      else f"HTTP {e.code}")
         return p
     except Exception as e:
         p["error"] = f"usage: {e}"
@@ -230,39 +252,84 @@ def probe_openrouter():
 
 
 def probe_nous():
+    # NOTE on identity: the hermes nous-portal.json token is the *hermes-agent*
+    # free-tier OAuth token (product nous-hermes-agent, rate_limit_source
+    # free_hermes_agent) — NOT your personal portal subscription. Its JWT always
+    # says paid_access:false, so we must NOT infer "Free" from it. The real plan &
+    # purchased balance live behind GET /api/oauth/account, which needs a *valid*
+    # token. We must NEVER call the refresh endpoint: Nous refresh tokens are
+    # single-use and only hermes may rotate them (reuse → full session revocation).
+    # So: env overrides (authoritative) > live account API (only if token unexpired)
+    # > rate limits / unknown. Never refresh.
     p = {"id": "nous", "name": "Nous", "kind": "balance", "icon": "chip",
          "currency": "USD", "ok": False}
+    claims, token = {}, None
     try:
-        tok = json.load(open(NOUS_PORTAL))["access_token"]
-        seg = tok.split(".")[1]
-        seg += "=" * (-len(seg) % 4)
-        c = json.loads(base64.urlsafe_b64decode(seg))
-    except Exception as e:
-        p["error"] = f"portal token: {e}"
-        return p
-    try:
-        spend = float(c.get("member_spend_usd") or 0)
-    except (TypeError, ValueError):
-        spend = 0.0
-    cap = c.get("member_spend_cap_usd")
-    free = not bool(c.get("paid_access"))
-    p["free"] = free
-    p["tier"] = c.get("subscription_tier")
-    p["spend_total"] = round(spend, 4)
-    if cap not in (None, ""):
+        d = json.load(open(NOUS_PORTAL))
+        token = d.get("access_token")
+        if token:
+            seg = token.split(".")[1]
+            seg += "=" * (-len(seg) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(seg))
+    except Exception:
+        pass
+
+    p["tier"] = claims.get("subscription_tier")
+    p["rate"] = {"rpm": claims.get("rate_limit_rpm"), "tpm": claims.get("rate_limit_tpm"),
+                 "rph": claims.get("rate_limit_rph"), "tph": claims.get("rate_limit_tph")}
+    if claims.get("iat"):
+        p["token_age_min"] = round((time.time() - float(claims["iat"])) / 60, 1)
+
+    # Live account API — ONLY when the existing token is still valid (never refresh).
+    live = None
+    exp = claims.get("exp")
+    if token and exp and float(exp) > time.time() + 30:
         try:
-            p["balance"] = round(float(cap) - spend, 2)
-        except (TypeError, ValueError):
-            pass
-    p["rate"] = {"rpm": c.get("rate_limit_rpm"), "tpm": c.get("rate_limit_tpm"),
-                 "rph": c.get("rate_limit_rph"), "tph": c.get("rate_limit_tph")}
-    p["token_age_min"] = round((time.time() - float(c["iat"])) / 60, 1) if c.get("iat") else None
+            acct = _http("GET", "https://portal.nousresearch.com/api/oauth/account",
+                         {"Authorization": "Bearer " + token, "Accept": "application/json"})
+            sub = acct.get("subscription") or {}
+            psa = acct.get("paid_service_access") or {}
+            live = {
+                "plan": sub.get("plan"),
+                "tier": sub.get("tier"),
+                "balance": _first_num(psa.get("total_usable_credits"),
+                                      psa.get("purchased_credits_remaining"),
+                                      sub.get("credits_remaining")),
+                "paid": psa.get("allowed", psa.get("paid_access")),
+            }
+        except Exception:
+            live = None
+
+    # Resolve plan + balance: env override (authoritative) > live > unknown.
+    plan_env = os.environ.get("INF_NOUS_PLAN", "").strip()
+    bal = _first_num(os.environ.get("INF_NOUS_BALANCE", "").strip().lstrip("$"))
+    if plan_env:
+        p["plan"] = plan_env
+    elif live and live.get("plan"):
+        p["plan"] = live["plan"]
+    if bal is None and live and live.get("balance") is not None:
+        bal = live["balance"]
+    if bal is not None:
+        p["balance"] = round(float(bal), 2)
+    if live and live.get("tier") is not None:
+        p["tier"] = live["tier"]
+
+    # Only mark FREE with positive evidence from the live account API — never from
+    # the stale agent JWT.
+    p["free"] = bool(live and live.get("paid") is False and not p.get("plan") and "balance" not in p)
+
     if "balance" in p:
         p["headline"] = f"${p['balance']:.2f}"
-    elif free:
+    elif p.get("plan"):
+        p["headline"] = p["plan"]
+    elif p["free"]:
         p["headline"] = f"Free T{p['tier']}" if p.get("tier") is not None else "Free"
     else:
-        p["headline"] = f"${spend:.2f} spent"
+        p["headline"] = "Nous"
+
+    if not token:
+        p["error"] = "no portal token (hermes Nous logged out)"
+        return p
     p["ok"] = True
     return p
 
@@ -303,16 +370,35 @@ PROBES = {
 }
 
 
+_last_good = {}  # provider id -> {"p": <last ok payload>, "ts": epoch}
+
+
 def collect():
+    """Run every enabled probe. On a transient failure (e.g. Claude's OAuth token
+    briefly 401s while Claude Code rotates it, or a network blip), serve the last
+    SUCCESSFUL payload for that provider marked `stale` instead of an error card —
+    so a tile freezes on its last good number rather than flashing an error. Only a
+    provider that has never succeeded surfaces its raw error."""
     out = []
     for pid in ENABLED:
         fn = PROBES.get(pid)
         if not fn:
             continue
         try:
-            out.append(fn())
+            p = fn()
         except Exception as e:  # a probe must never take down the loop
-            out.append({"id": pid, "name": pid, "kind": "balance", "ok": False, "error": str(e)})
+            p = {"id": pid, "name": pid, "kind": "balance", "ok": False, "error": str(e)}
+        if p.get("ok"):
+            _last_good[pid] = {"p": p, "ts": time.time()}
+            out.append(p)
+        elif pid in _last_good:
+            cached = dict(_last_good[pid]["p"])
+            cached["stale"] = True
+            cached["stale_min"] = round((time.time() - _last_good[pid]["ts"]) / 60, 1)
+            cached["last_error"] = p.get("error")
+            out.append(cached)
+        else:
+            out.append(p)  # never succeeded → surface the error
     return out
 
 
