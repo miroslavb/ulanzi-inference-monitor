@@ -3,7 +3,7 @@
   "Name": "Inference Monitor",
   "Description": "Live usage limits and balances for your inference providers, drawn on your deck keys. A Provider Switch key cycles the active provider; two tiles show its session/weekly limits (Claude, Ollama Cloud) or balance/spend (OpenRouter, Nous). Data comes from a small inf-agent running on the host that holds your credentials.",
   "Icon": "assets/icons/pluginIcon.png",
-  "Version": "1.2.0",
+  "Version": "1.2.1",
   "Category": "Inference Monitor",
   "CategoryIcon": "assets/icons/categoryIcon.png",
   "CodePath": "plugin/app.js",

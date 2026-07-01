@@ -259,7 +259,7 @@ def probe_openrouter():
 # refreshes + persists the rotation correctly (same code + lock the gateway uses).
 NOUS_HELPER_PY = os.environ.get("INF_NOUS_HELPER_PY", "/root/.hermes/hermes-agent/venv/bin/python")
 NOUS_HELPER_CWD = os.environ.get("INF_NOUS_HELPER_CWD", "/root/.hermes/hermes-agent")
-NOUS_LIVE_TTL = max(60, int(os.environ.get("INF_NOUS_LIVE_TTL", "300")))
+NOUS_LIVE_TTL = max(30, int(os.environ.get("INF_NOUS_LIVE_TTL", "60")))
 
 _NOUS_HELPER_SRC = (
     "import json\n"
@@ -273,13 +273,20 @@ _NOUS_HELPER_SRC = (
     "'plan':getattr(s,'plan',None),'tier':getattr(s,'tier',None),'balance':b,"
     "'monthly':getattr(s,'monthly_credits',None),'error':(str(i.error) if i.error else None)}))\n"
 )
-_nous_live = {"data": None, "ts": 0.0}
+NOUS_STALE_AFTER = max(180, 3 * NOUS_LIVE_TTL)  # flag stale only after repeated fetch failures
+_nous_live = {"data": None, "ts": 0.0}  # ts = last SUCCESSFUL live fetch
+
+
+def _log(msg):
+    print(f"[inf-agent] {msg}", flush=True)
 
 
 def _nous_account_live():
     """Live plan/balance via hermes's sanctioned account path (cached NOUS_LIVE_TTL).
     Returns a dict or None. hermes owns the refresh/persist/locking — this is the
-    only safe way to read the real balance. Falls back to the last good live data."""
+    only safe way to read the real balance. On failure, serves the last good value
+    (probe_nous flags it `stale` once it ages past NOUS_STALE_AFTER) and logs to the
+    journal so a real freeze is visible (vs a balance that simply isn't moving)."""
     if not os.path.exists(NOUS_HELPER_PY):
         return None
     if _nous_live["data"] is not None and (time.time() - _nous_live["ts"]) < NOUS_LIVE_TTL:
@@ -290,11 +297,16 @@ def _nous_account_live():
         line = next((ln for ln in reversed(r.stdout.splitlines()) if ln.strip().startswith("{")), "")
         data = json.loads(line) if line else None
         if data and data.get("logged_in") and not data.get("error"):
+            prev = (_nous_live["data"] or {}).get("balance")
             _nous_live["data"] = data
             _nous_live["ts"] = time.time()
+            _log(f"nous live ok: plan={data.get('plan')} balance={data.get('balance')}"
+                 + ("" if prev == data.get("balance") else f" (was {prev})"))
             return data
-    except Exception:
-        pass
+        why = (data or {}).get("error") or (r.stderr.strip()[-160:] if r.stderr else "no json")
+        _log(f"nous live fetch failed (serving last-good): {why}")
+    except Exception as e:
+        _log(f"nous live fetch EXC (serving last-good): {e}")
     return _nous_live["data"]  # last good live, if any
 
 
@@ -324,6 +336,11 @@ def probe_nous():
 
     live = _nous_account_live()
     p["live"] = bool(live)
+    if live and _nous_live["ts"]:
+        age = round(time.time() - _nous_live["ts"], 1)
+        p["live_age_s"] = age
+        if age > NOUS_STALE_AFTER:   # live fetch has been failing → flag frozen
+            p["stale"] = True
 
     plan_env = os.environ.get("INF_NOUS_PLAN", "").strip()
     bal_env = _first_num(os.environ.get("INF_NOUS_BALANCE", "").strip().lstrip("$"))

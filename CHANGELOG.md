@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.1
+
+Nous freshness + observability (agent-only; plugin unchanged from 1.1.0).
+
+- **Faster live refresh:** `INF_NOUS_LIVE_TTL` default 300s → **60s**, so the tile
+  tracks the account API within ~1 min instead of up to 5 min. (Residual gap to the
+  portal *dashboard* is Nous-side eventual consistency — `/api/oauth/account` trails
+  the portal UI slightly and can't be eliminated programmatically.)
+- **Freeze is now visible, not silent:** if the live fetch fails, the agent still
+  serves the last-good value but now (a) logs `nous live …` outcomes to the journal
+  (`journalctl -u inf-agent`), and (b) flags `stale` + `live_age_s` once the last
+  successful fetch ages past `NOUS_STALE_AFTER` (3×TTL) → the switch tile shows the
+  amber dot. Previously a failing helper froze the value with no indication.
+
 ## 1.2.0
 
 - **Live Nous balance & plan (agent).** The agent now reads the real portal

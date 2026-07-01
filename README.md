@@ -84,7 +84,7 @@ without a switch — the most recently configured address wins.)
   the single-use token refresh + persistence + locking, so the agent **never** calls the
   Nous refresh endpoint itself (reuse revokes the whole session). Configure via
   `INF_NOUS_HELPER_PY` / `INF_NOUS_HELPER_CWD` (defaults point at this box's hermes), cached
-  `INF_NOUS_LIVE_TTL` (300s). If hermes has no Nous session, it falls back to the
+  `INF_NOUS_LIVE_TTL` (60s). If hermes has no Nous session, it falls back to the
   `INF_NOUS_PLAN` / `INF_NOUS_BALANCE` env values; restore live with `hermes auth add nous`.
 - **Dialagram** is intentionally not included (no balance API; subscription
   inactive). Add providers by extending `agent/inf-agent.py` (`PROBES`).
