@@ -13,6 +13,24 @@ const decode = (uri) => Buffer.from(uri.split(',')[1], 'base64').toString('utf8'
 let failures = 0;
 function check(cond, msg) { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!cond) failures++; }
 
+// --- persist.js round-trip (Studio-restart resilience, v1.3.0) ---------------
+{
+  const { loadAgentUrl, saveAgentUrl } = await import('../com.ulanzi.infmonitor.ulanziPlugin/plugin/monitor/persist.js');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  const { writeFileSync: wf, rmSync } = await import('fs');
+  const f = join(tmpdir(), `inf-persist-test-${process.pid}.json`);
+  rmSync(f, { force: true });
+  check(loadAgentUrl(f) === '', 'persist: missing file -> empty');
+  check(saveAgentUrl(f, 'http://100.110.137.47:9890') === true, 'persist: save ok');
+  check(loadAgentUrl(f) === 'http://100.110.137.47:9890', 'persist: round-trip');
+  wf(f, 'not json{{{');
+  check(loadAgentUrl(f) === '', 'persist: corrupt file -> empty (fail-open)');
+  wf(f, JSON.stringify({ agentUrl: '   ' }));
+  check(loadAgentUrl(f) === '', 'persist: blank url -> empty');
+  rmSync(f, { force: true });
+}
+
 const s = new ProviderSampler(URL);
 await s.sample();
 

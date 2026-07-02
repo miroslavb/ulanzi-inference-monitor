@@ -18,7 +18,7 @@ VER="$(node -p "require('./package.json').version")"
 ZIP="$OUT/${PLUG}-${VER}.zip"
 rm -f "$ZIP"
 cd "$ROOT"
-zip -r -q "$ZIP" "$PLUG" -x "*/.DS_Store" "*/npm-debug.log" "*/node_modules/.package-lock.json"
+zip -r -q "$ZIP" "$PLUG" -x "*/.DS_Store" "*/npm-debug.log" "*/node_modules/.package-lock.json" "*/.agent-url.json"
 echo "built: $ZIP"
 
 # Standalone agent bundle (inf-agent.py + README + systemd unit).

@@ -8,3 +8,4 @@ __pycache__/
 .disk-guard.yaml
 test/preview.html
 agent/*.run.log
+.agent-url.json

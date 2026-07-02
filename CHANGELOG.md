@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0
+
+Studio-restart resilience (plugin-only; agent unchanged).
+
+Root cause (observed live 2026-07-02): after an Ulanzi Studio restart the Property
+Inspector still *shows* the saved Agent address, but Studio does not re-deliver the
+stored key settings to the plugin's Node backend — so the sampler silently fell back
+to the `127.0.0.1:9890` default and every key showed **"agent off"** until the user
+re-saved any setting by hand.
+
+- **Persist the agent address.** Every applied address change is written to
+  `plugin/monitor/.agent-url.json` (fail-open); on startup the sampler begins from
+  the persisted address instead of the localhost default. A Studio restart that
+  drops the settings no longer takes the deck down.
+- **Actively pull missing settings.** When a key is (re-)added without its stored
+  params, the plugin now calls `getSettings` and consumes the `didReceiveSettings`
+  reply — at most once per key, so never-configured keys can't loop.
+
 ## 1.2.1
 
 Nous freshness + observability (agent-only; plugin unchanged from 1.1.0).
