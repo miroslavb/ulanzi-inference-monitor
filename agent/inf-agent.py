@@ -456,9 +456,21 @@ def _refresh_loop():
 
 
 # ---- http ------------------------------------------------------------------
+_poll_seen = {}  # client ip -> last logged ts; first poll + one line per 10 min
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def _log_poller(self):
+        # Throttled client-visibility log: answers "is the plugin polling us?"
+        # (диагноз "agent off" на деке) straight from journalctl.
+        ip = self.client_address[0]
+        now = time.time()
+        if now - _poll_seen.get(ip, 0) >= 600:
+            _poll_seen[ip] = now
+            print(f"[inf-agent] poll from {ip}", flush=True)
 
     def _send(self, code, body, ctype="application/json"):
         b = body.encode() if isinstance(body, str) else body
@@ -481,6 +493,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/healthz":
             return self._send(200, "ok", "text/plain")
         if u.path in ("/providers", "/"):
+            self._log_poller()
             if not self._authed(parse_qs(u.query)):
                 return self._send(401, json.dumps({"error": "unauthorized"}))
             with _lock:
