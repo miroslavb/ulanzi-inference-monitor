@@ -27,4 +27,6 @@ rm -f "$AZIP"
 zip -r -q "$AZIP" agent -x "*/.DS_Store" "*/__pycache__/*" "*.pyc" "*.log"
 echo "built: $AZIP"
 
-unzip -l "$ZIP" | tail -n +4 | head -n 26
+# `tail | head` trips `set -o pipefail` when head closes early (SIGPIPE in
+# tail), falsely failing an otherwise successful build. sed reads to EOF.
+unzip -l "$ZIP" | sed -n '4,29p'

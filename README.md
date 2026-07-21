@@ -10,6 +10,7 @@ One key cycles the provider; two tiles show its numbers:
 | Provider | Kind | Primary tile | Secondary tile |
 |----------|------|--------------|----------------|
 | **Claude** (Anthropic) | limits | Session (5h) % + reset | Week (7d) % + reset |
+| **OpenAI** (Codex) | limits | Short window % or plan | Long window % + reset |
 | **Ollama Cloud** | limits | Plan | Renews in… |
 | **OpenRouter** | balance | Balance ($) | Spend today / week |
 | **Nous** | balance | Free / tier | Rate limit (rpm/tpm) |
@@ -19,7 +20,7 @@ One key cycles the provider; two tiles show its numbers:
 │ Provider │  │  ◐ 8%    │  │  ◔ 2%    │
 │  Switch  │  │ SESSION  │  │  WEEK    │     ← Claude selected
 │ 🤖 Claude│  │ ↻ 4h 15m │  │ ↻ 5d 23h │
-│   1/4 8% │  └──────────┘  └──────────┘
+│   1/5 8% │  └──────────┘  └──────────┘
 └──────────┘   press switch →  $8.29 / today $0.02   ← OpenRouter selected
 ```
 
@@ -29,7 +30,7 @@ One key cycles the provider; two tiles show its numbers:
  host with your keys (hermes NUC)              machine running Ulanzi Studio
 ┌───────────────────────────────┐            ┌──────────────────────────────┐
 │ inf-agent.py                   │  HTTP      │ Inference Monitor plugin       │
-│  reads .claude / .hermes creds │  (Tailscale)│  ProviderSampler → /providers │
+│  reads .claude/.codex/.hermes  │  (Tailscale)│  ProviderSampler → /providers │
 │  GET /providers  → all providers├───────────▶│  Switch key cycles providers  │
 │  refreshes every 60s           │            │  Tiles render the active one  │
 └───────────────────────────────┘            └──────────────────────────────┘
@@ -64,8 +65,8 @@ Double-click the `.zip` (or import it in Ulanzi Studio). Then on the deck:
    host's Tailscale address, e.g. `http://100.x.y.z:9890`.
 2. Drop two **Provider Tile** keys next to it; set one to **Primary** and one to
    **Secondary**.
-3. Press the switch to cycle Claude → OpenRouter → Nous → Ollama Cloud. The tiles
-   follow the selection.
+3. Press the switch to cycle Claude → OpenAI → OpenRouter → Nous → Ollama Cloud.
+   The tiles follow the selection.
 
 (You can also set the agent address on a Provider Tile, so a lone tile works
 without a switch — the most recently configured address wins.)
@@ -76,6 +77,13 @@ without a switch — the most recently configured address wins.)
   token Claude Code keeps fresh; the agent only **reads** it (never refreshes, so
   it can't disturb your Claude Code login). On token expiry the tile shows an error
   until Claude Code refreshes.
+- **OpenAI** usage comes from the same read-only ChatGPT usage endpoint used by
+  Codex (`/backend-api/wham/usage`). The agent reads `/root/.codex/auth.json` but
+  never refreshes or writes it. Window labels follow the durations OpenAI actually
+  returns (for example `5H` and `WEEK`); accounts with only a weekly window show
+  the plan on the first tile and the weekly gauge on the second. If the endpoint
+  is briefly unavailable, the newest local Codex rate-limit snapshot is shown as
+  stale until live polling recovers.
 - **Ollama Cloud** exposes no per-window usage via any API, so its limit tiles show
   plan + renewal date rather than a session/week %.
 - **Nous** rate limits/tier come from the portal JWT (no network call). Real plan +

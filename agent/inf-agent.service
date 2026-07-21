@@ -11,6 +11,8 @@ Environment=INF_AGENT_PORT=9890
 # Environment=INF_AGENT_TOKEN=change-me
 # Credential paths default to this box; override if yours differ:
 # Environment=INF_CLAUDE_CREDS=/root/.claude/.credentials.json
+# Environment=INF_OPENAI_CREDS=/root/.codex/auth.json
+# Environment=INF_OPENAI_SESSIONS=/root/.codex/sessions
 # Environment=INF_HERMES_ENV=/root/.hermes/.env
 # Environment=INF_HERMES_CONFIG=/root/.hermes/config.yaml
 # Environment=INF_NOUS_PORTAL=/root/.hermes/nous-portal.json

@@ -19,7 +19,7 @@
     "30 sec": "30 sec",
     "Agent": "Agent",
     "Agent address": "Agent address",
-    "TileHint": "Place TWO Provider Tiles next to a Provider Switch: set one to Primary and one to Secondary. They render whichever provider the switch has selected — session/week % for Claude & Ollama Cloud, balance & spend for OpenRouter & Nous.",
+    "TileHint": "Place TWO Provider Tiles next to a Provider Switch: set one to Primary and one to Secondary. They render whichever provider the switch has selected — usage windows for Claude & OpenAI, plan/renewal for Ollama Cloud, balance & spend for OpenRouter & Nous.",
     "SwitchHint": "Run inf-agent on the host that holds your provider keys (see the project README) and enter its address, e.g. http://100.x.y.z:9890 over Tailscale. Pressing this key cycles the active provider; the Provider Tiles follow it."
   }
 }

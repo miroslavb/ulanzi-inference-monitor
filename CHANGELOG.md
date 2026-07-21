@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0
+
+- **OpenAI/Codex usage provider.** The agent now reads the live ChatGPT account
+  usage payload used by the official Codex CLI and exposes its real rate-limit
+  windows as an `OpenAI` provider. It reads Codex auth but never refreshes,
+  rewrites, or logs it.
+- Window labels are duration-aware (`5H`, `DAY`, `WEEK`, etc.). If an account has
+  only the current weekly window, the first tile shows its plan and the second
+  shows the weekly ring gauge; dual-window accounts populate both gauges.
+- A bounded tail-read of recent Codex rollout JSONL supplies a stale fallback on
+  cold start when the live usage request is temporarily unavailable. The existing
+  per-provider last-good cache handles later transient failures.
+- Added Python probe tests and a synthetic D200H-safe OpenAI render test.
+- The live preview now treats an upstream provider error as a valid, asserted
+  error-card state while still requiring the new OpenAI provider to be live.
+- Fixed `pack.sh` returning a false failure after successful zip creation under
+  `pipefail` (`tail | head` SIGPIPE); archive listing now reads cleanly to EOF.
+
 ## 1.3.0
 
 Studio-restart resilience (plugin-only; agent unchanged).

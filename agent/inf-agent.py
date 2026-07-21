@@ -12,6 +12,7 @@ Stdlib only (urllib/json/base64) — no pip installs.
 
 Providers (auto-discovered from the box's credential files; override via env):
   * claude        — Anthropic OAuth usage  (5h session % + 7d week %, + resets)
+  * openai        — Codex ChatGPT usage    (live account rate-limit windows)
   * openrouter    — /credits + /key         (balance + spend today/week/month)
   * nous          — portal JWT claims       (tier, spend, rate limits; free tier)
   * ollama_cloud  — POST /api/me            (plan + billing-period renewal)
@@ -21,9 +22,10 @@ Env (all optional — sane defaults for this box):
   INF_AGENT_BIND      bind address           (default 0.0.0.0; set the Tailscale IP to stay on the tailnet)
   INF_AGENT_TOKEN     shared secret          (?token=.. or Authorization: Bearer ..)
   INF_AGENT_INTERVAL  provider poll seconds  (default 60)
-  INF_AGENT_PROVIDERS comma list to enable   (default claude,openrouter,nous,ollama_cloud)
+  INF_AGENT_PROVIDERS comma list to enable   (default claude,openai,openrouter,nous,ollama_cloud)
 
   INF_CLAUDE_CREDS    path to Claude creds   (default /root/.claude/.credentials.json)
+  INF_OPENAI_CREDS    path to Codex auth     (default /root/.codex/auth.json)
   INF_HERMES_ENV      path to hermes .env    (default /root/.hermes/.env)
   INF_HERMES_CONFIG   path to hermes config  (default /root/.hermes/config.yaml)
   INF_NOUS_PORTAL     path to nous portal js (default /root/.hermes/nous-portal.json)
@@ -34,6 +36,7 @@ Endpoints:
   GET /healthz           -> "ok"
 """
 import base64
+import glob
 import json
 import os
 import re
@@ -53,14 +56,18 @@ BIND = os.environ.get("INF_AGENT_BIND", "0.0.0.0")
 TOKEN = os.environ.get("INF_AGENT_TOKEN", "")
 INTERVAL = max(15, int(os.environ.get("INF_AGENT_INTERVAL", "60")))
 ENABLED = [p.strip() for p in os.environ.get(
-    "INF_AGENT_PROVIDERS", "claude,openrouter,nous,ollama_cloud").split(",") if p.strip()]
+    "INF_AGENT_PROVIDERS", "claude,openai,openrouter,nous,ollama_cloud").split(",") if p.strip()]
 
 CLAUDE_CREDS = os.environ.get("INF_CLAUDE_CREDS", "/root/.claude/.credentials.json")
+OPENAI_CREDS = os.environ.get("INF_OPENAI_CREDS", "/root/.codex/auth.json")
+OPENAI_USAGE_URL = os.environ.get(
+    "INF_OPENAI_USAGE_URL", "https://chatgpt.com/backend-api/wham/usage")
+OPENAI_SESSIONS = os.environ.get("INF_OPENAI_SESSIONS", "/root/.codex/sessions")
 HERMES_ENV = os.environ.get("INF_HERMES_ENV", "/root/.hermes/.env")
 HERMES_CONFIG = os.environ.get("INF_HERMES_CONFIG", "/root/.hermes/config.yaml")
 NOUS_PORTAL = os.environ.get("INF_NOUS_PORTAL", "/root/.hermes/nous-portal.json")
 
-UA = "ulanzi-inf-agent/1.0"
+UA = "ulanzi-inf-agent/1.4"
 HTTP_TIMEOUT = 12
 
 _snapshot = {"ts": 0, "agent_host": socket.gethostname(), "interval": INTERVAL, "providers": []}
@@ -130,6 +137,8 @@ def _yaml_value(path, *key_path):
 
 def _iso_to_dt(s):
     try:
+        if isinstance(s, (int, float)) or (isinstance(s, str) and s.strip().isdigit()):
+            return datetime.fromtimestamp(float(s), timezone.utc)
         return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except Exception:
         return None
@@ -223,6 +232,168 @@ def probe_claude():
         p["detail"] = detail
     if not p.get("headline"):
         p["headline"] = p.get("plan") or "Claude"
+    p["ok"] = True
+    return p
+
+
+def _window_label(seconds):
+    """Compact, truthful label for a rate-limit window."""
+    seconds = int(seconds or 0)
+    if seconds <= 0:
+        return "WINDOW"
+    if seconds % 604800 == 0:
+        n = seconds // 604800
+        return "WEEK" if n == 1 else f"{n}W"
+    if seconds % 86400 == 0:
+        n = seconds // 86400
+        return "DAY" if n == 1 else f"{n}D"
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}H"
+    return f"{max(1, round(seconds / 60))}M"
+
+
+def _openai_window(raw):
+    if not isinstance(raw, dict) or raw.get("used_percent") is None:
+        return None
+    seconds = int(raw.get("limit_window_seconds") or 0)
+    reset = raw.get("reset_at")
+    return {
+        "pct": round(float(raw["used_percent"]), 1),
+        "window_seconds": seconds,
+        "label": _window_label(seconds),
+        "resets_at": reset,
+        "resets_in": _resets_in(reset),
+    }
+
+
+def _tail_json_objects(path, max_bytes=262144):
+    """Yield recent JSONL objects without reading a whole Codex rollout file."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            start = max(0, size - max_bytes)
+            f.seek(start)
+            raw = f.read().decode("utf-8", "replace")
+        lines = raw.splitlines()
+        if start and lines:
+            lines = lines[1:]  # first line may be a truncated JSON object
+        for line in reversed(lines):
+            try:
+                yield json.loads(line)
+            except (TypeError, ValueError):
+                continue
+    except OSError:
+        return
+
+
+def _latest_codex_rate_limits():
+    """Last Codex-emitted rate-limit snapshot, used only as an offline fallback."""
+    paths = glob.glob(os.path.join(OPENAI_SESSIONS, "**", "*.jsonl"), recursive=True)
+    try:
+        paths.sort(key=os.path.getmtime, reverse=True)
+    except OSError:
+        return None
+    for path in paths[:8]:
+        for row in _tail_json_objects(path):
+            payload = row.get("payload") if isinstance(row, dict) else None
+            if not isinstance(payload, dict) or payload.get("type") != "token_count":
+                continue
+            rate = payload.get("rate_limits")
+            if not isinstance(rate, dict):
+                continue
+
+            def convert(win):
+                if not isinstance(win, dict):
+                    return None
+                return {
+                    "used_percent": win.get("used_percent"),
+                    "limit_window_seconds": int(win.get("window_minutes") or 0) * 60,
+                    "reset_at": win.get("resets_at"),
+                }
+
+            return {
+                "plan_type": rate.get("plan_type"),
+                "rate_limit": {
+                    "primary_window": convert(rate.get("primary")),
+                    "secondary_window": convert(rate.get("secondary")),
+                    "limit_reached": bool(rate.get("rate_limit_reached_type")),
+                },
+                "credits": rate.get("credits"),
+            }
+    return None
+
+
+def probe_openai():
+    """Codex/ChatGPT plan usage from the same endpoint the official CLI uses.
+
+    The agent reads Codex's access token but never refreshes or writes it. If the
+    live endpoint is briefly unavailable, the newest rate-limit snapshot already
+    written by Codex to its local rollout JSONL is served as stale data.
+    """
+    p = {"id": "openai", "name": "OpenAI", "kind": "limit",
+         "icon": "lightning-bolt", "ok": False, "session": None, "week": None}
+    try:
+        with open(OPENAI_CREDS) as f:
+            auth = json.load(f)
+        tokens = auth.get("tokens") or {}
+        token = tokens.get("access_token")
+        account_id = tokens.get("account_id")
+        if not token:
+            raise ValueError("no ChatGPT access token")
+    except Exception as e:
+        p["error"] = f"Codex auth: {e} (run: codex login)"
+        return p
+
+    headers = {"Authorization": "Bearer " + token}
+    if account_id:
+        headers["ChatGPT-Account-Id"] = str(account_id)
+
+    live_error = None
+    try:
+        usage = _http("GET", OPENAI_USAGE_URL, headers)
+        p["source"] = "live"
+    except urllib.error.HTTPError as e:
+        live_error = (f"token expired ({e.code})" if e.code in (401, 403)
+                      else f"usage HTTP {e.code}")
+        usage = _latest_codex_rate_limits()
+    except Exception as e:
+        live_error = f"usage: {e}"
+        usage = _latest_codex_rate_limits()
+
+    if not isinstance(usage, dict):
+        p["error"] = live_error or "empty usage response"
+        return p
+    if live_error:
+        p["source"] = "codex-session"
+        p["stale"] = True
+        p["last_error"] = live_error
+
+    plan = str(usage.get("plan_type") or "").strip()
+    if plan:
+        p["plan"] = plan.title()
+    p["headline"] = p.get("plan") or "Codex"
+
+    rate = usage.get("rate_limit") or {}
+    windows = [w for w in (
+        _openai_window(rate.get("primary_window")),
+        _openai_window(rate.get("secondary_window")),
+    ) if w]
+    windows.sort(key=lambda w: w.get("window_seconds") or 0)
+    for win in windows:
+        if (win.get("window_seconds") or 0) <= 86400 and p["session"] is None:
+            p["session"] = win
+        elif p["week"] is None:
+            p["week"] = win
+        elif p["session"] is None:
+            p["session"] = win
+    if len(windows) >= 2 and p["session"] is None:
+        p["session"], p["week"] = windows[0], windows[-1]
+
+    p["limit_reached"] = bool(rate.get("limit_reached"))
+    credits = usage.get("credits") or {}
+    if credits.get("has_credits") and credits.get("balance") is not None:
+        p["credit_balance"] = _first_num(credits.get("balance"))
     p["ok"] = True
     return p
 
@@ -408,6 +579,7 @@ def probe_ollama_cloud():
 
 PROBES = {
     "claude": probe_claude,
+    "openai": probe_openai,
     "openrouter": probe_openrouter,
     "nous": probe_nous,
     "ollama_cloud": probe_ollama_cloud,

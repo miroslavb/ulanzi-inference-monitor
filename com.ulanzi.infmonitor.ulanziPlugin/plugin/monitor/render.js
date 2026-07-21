@@ -1,7 +1,7 @@
 // render.js — inference-provider tiles as SVG (pure string templating, no deps).
 //
 // Two tile shapes, picked from the active provider's `kind`:
-//   * limit   (claude, ollama_cloud) — a ring gauge of % utilisation, with the
+//   * limit   (claude, openai, ollama_cloud) — a ring gauge of % utilisation, with the
 //     reset countdown beneath. Primary slot = session (5h), secondary = week (7d).
 //     When a window has no live %, the ring is replaced by a plan/renewal card.
 //   * balance (openrouter, nous)     — a value card. Primary slot = balance,
@@ -127,7 +127,7 @@ export function tileDataUri(o) {
 
 function limitTile(t, p, slot) {
   const win = slot === 'primary' ? p.session : p.week;
-  const label = slot === 'primary' ? 'SESSION' : 'WEEK';
+  const label = (win && win.label) || (slot === 'primary' ? 'SESSION' : 'WEEK');
   let s = header(t, label);
   if (win && typeof win.pct === 'number') {
     s += ring(t, win.pct, Math.round(win.pct) + '%');
@@ -197,9 +197,10 @@ export function switchTileDataUri(o) {
 
   // Headline: live %, balance or plan — colour the limit % by load.
   let head = p.headline || '', headColor = ACCENT;
-  if (p.kind === 'limit' && p.session && typeof p.session.pct === 'number') {
-    head = Math.round(p.session.pct) + '%';
-    headColor = utilColor(p.session.pct);
+  const activeWindow = p.kind === 'limit' && (p.session || p.week);
+  if (activeWindow && typeof activeWindow.pct === 'number') {
+    head = Math.round(activeWindow.pct) + '%';
+    headColor = utilColor(activeWindow.pct);
   }
   const headline = head ? `<text x="${C / 2}" y="90" text-anchor="middle" ${FAM} font-size="13" font-weight="700" fill="${headColor}">${esc(truncate(head, 12))}</text>` : '';
 

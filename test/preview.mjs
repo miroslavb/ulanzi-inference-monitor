@@ -35,7 +35,8 @@ const s = new ProviderSampler(URL);
 await s.sample();
 
 check(s.ok, `sampler reachable (${URL})`);
-check(s.count() === 4, `4 providers (got ${s.count()}: ${s.providers.map(p => p.id).join(',')})`);
+check(s.count() === 5, `5 providers (got ${s.count()}: ${s.providers.map(p => p.id).join(',')})`);
+check(s.providers.some(p => p.id === 'openai' && p.ok), 'OpenAI usage provider is live');
 
 const cards = [];
 for (let i = 0; i < s.count(); i++) {
@@ -52,7 +53,9 @@ for (let i = 0; i < s.count(); i++) {
 
   // Per-kind content assertions.
   const ap = decode(a), bp = decode(b);
-  if (p.kind === 'limit' && p.session) {
+  if (p.ok === false) {
+    check(ap.includes('⚠') || ap.includes('&#9888;'), `${p.id} primary surfaces provider error`);
+  } else if (p.kind === 'limit' && p.session) {
     check(ap.includes('SESSION') && ap.includes('%'), `${p.id} primary = session %`);
     check(bp.includes('WEEK'), `${p.id} secondary = week`);
   } else if (p.kind === 'limit') {
