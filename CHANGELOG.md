@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Treat Hermes's structured `logged_in:false` Nous response as the supported
+  configured-fallback state, not as a malformed `no json` fetch failure. Retry
+  login discovery every 15 minutes and log the fallback notice once per agent
+  process, while keeping real helper failures visible with the exit status.
+
 ## 1.4.0
 
 - **OpenAI/Codex usage provider.** The agent now reads the live ChatGPT account

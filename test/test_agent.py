@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,6 +133,64 @@ class OpenAIProbeTest(unittest.TestCase):
         self.assertEqual(result["plan_type"], "pro")
         self.assertEqual(result["rate_limit"]["primary_window"]["limit_window_seconds"], 18000)
         self.assertEqual(result["rate_limit"]["secondary_window"]["used_percent"], 34)
+
+
+class NousLiveProbeTest(unittest.TestCase):
+    def setUp(self):
+        self.old_run = agent.subprocess.run
+        self.old_log = agent._log
+        self.old_live = agent._nous_live
+        self.old_retry = agent.NOUS_LOGGED_OUT_RETRY
+        agent.NOUS_LOGGED_OUT_RETRY = 900
+        agent._nous_live = {"data": None, "ts": 0.0, "retry_at": 0.0, "notice": None}
+        self.logs = []
+        agent._log = self.logs.append
+
+    def tearDown(self):
+        agent.subprocess.run = self.old_run
+        agent._log = self.old_log
+        agent._nous_live = self.old_live
+        agent.NOUS_LOGGED_OUT_RETRY = self.old_retry
+
+    def test_logged_out_json_uses_fallback_without_failure_spam(self):
+        calls = []
+
+        def fake_run(*args, **kwargs):
+            calls.append((args, kwargs))
+            return SimpleNamespace(
+                stdout=json.dumps({
+                    "logged_in": False,
+                    "paid": None,
+                    "plan": None,
+                    "tier": None,
+                    "balance": None,
+                    "monthly": None,
+                    "error": None,
+                }) + "\n",
+                stderr="",
+                returncode=0,
+            )
+
+        agent.subprocess.run = fake_run
+
+        self.assertIsNone(agent._nous_account_live())
+        self.assertIsNone(agent._nous_account_live())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            self.logs,
+            ["nous live unavailable: not logged in; using configured fallback"],
+        )
+        self.assertFalse(any("fetch failed" in message for message in self.logs))
+
+    def test_missing_json_remains_an_actionable_failure(self):
+        agent.subprocess.run = lambda *args, **kwargs: SimpleNamespace(
+            stdout="", stderr="", returncode=7)
+
+        self.assertIsNone(agent._nous_account_live())
+        self.assertEqual(
+            self.logs,
+            ["nous live fetch failed (serving last-good): helper returned no JSON (exit 7)"],
+        )
 
 
 if __name__ == "__main__":

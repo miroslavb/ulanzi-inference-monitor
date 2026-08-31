@@ -3,6 +3,7 @@
 - This repository is the source of truth for the Ulanzi Inference Monitor plugin and its standalone `inf-agent`.
 - Preserve the provider contract in `agent/README.md`: one `/providers` snapshot, `kind: limit|balance`, and per-provider failures isolated by the last-good cache.
 - Provider probes may read local credentials but must never refresh, rewrite, or log secrets. OpenAI uses Codex's ChatGPT token read-only via `/root/.codex/auth.json`; Claude uses its OAuth credentials read-only.
+- Hermes returning structured Nous account JSON with `logged_in:false` is a supported fallback state, not a fetch failure. Keep the retry backoff and do not reintroduce per-refresh `no json` log spam; malformed helper output and nonzero exits must remain visible.
 - Keep the agent Python-stdlib-only. Add dependencies to the plugin only when the Ulanzi runtime actually requires them.
 - The D200H SVG renderer does not reliably support `pathLength`; percentage rings must remain explicit arc paths.
 - After code changes run: `python3 test/test_agent.py -v`, `python3 -m py_compile agent/inf-agent.py`, `node --check` for changed JavaScript, `node test/render-openai.mjs`, and `./pack.sh`.

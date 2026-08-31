@@ -431,6 +431,8 @@ def probe_openrouter():
 NOUS_HELPER_PY = os.environ.get("INF_NOUS_HELPER_PY", "/root/.hermes/hermes-agent/venv/bin/python")
 NOUS_HELPER_CWD = os.environ.get("INF_NOUS_HELPER_CWD", "/root/.hermes/hermes-agent")
 NOUS_LIVE_TTL = max(30, int(os.environ.get("INF_NOUS_LIVE_TTL", "60")))
+NOUS_LOGGED_OUT_RETRY = max(
+    NOUS_LIVE_TTL, int(os.environ.get("INF_NOUS_LOGGED_OUT_RETRY", "900")))
 
 _NOUS_HELPER_SRC = (
     "import json\n"
@@ -445,7 +447,12 @@ _NOUS_HELPER_SRC = (
     "'monthly':getattr(s,'monthly_credits',None),'error':(str(i.error) if i.error else None)}))\n"
 )
 NOUS_STALE_AFTER = max(180, 3 * NOUS_LIVE_TTL)  # flag stale only after repeated fetch failures
-_nous_live = {"data": None, "ts": 0.0}  # ts = last SUCCESSFUL live fetch
+_nous_live = {
+    "data": None,
+    "ts": 0.0,          # last successful live fetch
+    "retry_at": 0.0,    # logged-out is stable; do not spawn the helper every minute
+    "notice": None,     # log stable availability states once per process
+}
 
 
 def _log(msg):
@@ -460,7 +467,10 @@ def _nous_account_live():
     journal so a real freeze is visible (vs a balance that simply isn't moving)."""
     if not os.path.exists(NOUS_HELPER_PY):
         return None
-    if _nous_live["data"] is not None and (time.time() - _nous_live["ts"]) < NOUS_LIVE_TTL:
+    now = time.time()
+    if _nous_live["data"] is not None and (now - _nous_live["ts"]) < NOUS_LIVE_TTL:
+        return _nous_live["data"]
+    if now < _nous_live["retry_at"]:
         return _nous_live["data"]
     try:
         r = subprocess.run([NOUS_HELPER_PY, "-c", _NOUS_HELPER_SRC], cwd=NOUS_HELPER_CWD,
@@ -471,10 +481,23 @@ def _nous_account_live():
             prev = (_nous_live["data"] or {}).get("balance")
             _nous_live["data"] = data
             _nous_live["ts"] = time.time()
+            _nous_live["retry_at"] = 0.0
+            _nous_live["notice"] = None
             _log(f"nous live ok: plan={data.get('plan')} balance={data.get('balance')}"
                  + ("" if prev == data.get("balance") else f" (was {prev})"))
             return data
-        why = (data or {}).get("error") or (r.stderr.strip()[-160:] if r.stderr else "no json")
+        if data and data.get("logged_in") is False and not data.get("error"):
+            _nous_live["retry_at"] = time.time() + NOUS_LOGGED_OUT_RETRY
+            if _nous_live["notice"] != "logged_out":
+                _log("nous live unavailable: not logged in; using configured fallback")
+                _nous_live["notice"] = "logged_out"
+            return _nous_live["data"]
+        why = (data or {}).get("error")
+        if not why and r.stderr:
+            why = r.stderr.strip()[-160:]
+        if not why:
+            why = f"helper returned no JSON (exit {r.returncode})" if not line \
+                else "unexpected helper response"
         _log(f"nous live fetch failed (serving last-good): {why}")
     except Exception as e:
         _log(f"nous live fetch EXC (serving last-good): {e}")
