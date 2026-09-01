@@ -5,7 +5,12 @@ Ulanzi deck keys — a sibling of [ulanzi-system-monitor](https://github.com/mir
 that reuses the same interface model (a **cycler key** + tiles that follow the
 active selection).
 
-One key cycles the provider; two tiles show its numbers:
+**Latest release:** [v1.5.0](https://github.com/miroslavb/ulanzi-inference-monitor/releases/tag/v1.5.0)
+ships both the [Ulanzi Studio plugin](https://github.com/miroslavb/ulanzi-inference-monitor/releases/download/v1.5.0/com.ulanzi.infmonitor.ulanziPlugin-1.5.0.zip)
+and the [standalone inf-agent](https://github.com/miroslavb/ulanzi-inference-monitor/releases/download/v1.5.0/inf-agent-1.5.0.zip).
+
+One key cycles the provider; two tiles show its main numbers, with an optional
+third monthly tile for providers that expose it:
 
 | Provider | Kind | Primary tile | Secondary tile |
 |----------|------|--------------|----------------|
@@ -21,7 +26,7 @@ One key cycles the provider; two tiles show its numbers:
 │ Provider │  │  ◐ 8%    │  │  ◔ 2%    │
 │  Switch  │  │ SESSION  │  │  WEEK    │     ← Claude selected
 │ 🤖 Claude│  │ ↻ 4h 15m │  │ ↻ 5d 23h │
-│   1/5 8% │  └──────────┘  └──────────┘
+│   1/6 8% │  └──────────┘  └──────────┘
 └──────────┘   press switch →  $8.29 / today $0.02   ← OpenRouter selected
 ```
 
