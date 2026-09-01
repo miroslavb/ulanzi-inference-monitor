@@ -20,6 +20,6 @@
     "Agent": "Agent",
     "Agent address": "Agent address",
     "TileHint": "Place two Provider Tiles next to a Provider Switch: set one to Primary and one to Secondary. Add a third Monthly tile for OpenCode Go's monthly limit. Tiles render the provider selected by the switch — usage windows for Claude, OpenAI, Ollama Cloud & OpenCode Go; balance & spend for OpenRouter & Nous.",
-    "SwitchHint": "Run inf-agent on the host that holds your provider keys (see the project README) and enter its address, e.g. http://100.x.y.z:9890 over Tailscale. Choose which returned providers this switch cycles; the Provider Tiles follow its active selection."
+    "SwitchHint": "Run inf-agent on the host that holds your provider keys (see the project README) and enter its address, e.g. http://100.x.y.z:9890 over Tailscale. Tick providers to include them, use the arrows to set their cycle order, or reset to all; the Provider Tiles follow the active selection."
   }
 }

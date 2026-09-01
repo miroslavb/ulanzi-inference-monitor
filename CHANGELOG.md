@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.5.1
+
+- **Working provider editor.** Provider rows now use the Ulanzi PI's required
+  `input + label` checkbox structure, so selected/unselected state is visible and
+  clickable instead of appearing as a read-only text list.
+- Selected providers have explicit ↑/↓ controls. Their saved `providerIds` order
+  is now the actual deck cycle order instead of being discarded in favour of the
+  agent response order.
+- Providers omitted from an older allow-list remain visible under **Available
+  providers**. This makes OpenAI recoverable by ticking it; **All / reset order**
+  restores all returned providers in agent order.
+- Added pure editor-model and ordered-cycle regression tests plus a real Chromium
+  Property Inspector interaction check.
+
 ## 1.5.0
 
 - **Ollama Cloud usage limits.** The agent now reads the authenticated

@@ -13,17 +13,11 @@ function buildSettings() {
     refresh: parseInt(document.querySelector('#refresh').value, 10) || 5000,
     // Do not turn old/all-provider settings into an empty allow-list before the
     // agent list has arrived.
-    providerIds: providers.length
-      ? [...document.querySelectorAll('#providerList input:checked')].map((el) => el.value)
-      : savedProviderIds,
+    providerIds: providers.length ? ProviderOrder.selected(providers, savedProviderIds) : savedProviderIds,
   };
 }
 function saveNow() { $UD.sendParamFromPlugin(buildSettings()); }
 const saveDebounced = (typeof Utils !== 'undefined' && Utils.debounce) ? Utils.debounce(saveNow) : saveNow;
-
-function selectedProviderIds() {
-  return Array.isArray(savedProviderIds) ? new Set(savedProviderIds) : new Set(providers.map((p) => p.id));
-}
 
 function renderProviders(message) {
   const list = document.querySelector('#providerList');
@@ -31,22 +25,65 @@ function renderProviders(message) {
     list.innerHTML = `<div class="provider-empty">${message || 'Connecting to the agent…'}</div>`;
     return;
   }
-  const selected = selectedProviderIds();
+  const rows = ProviderOrder.rows(providers, savedProviderIds);
+  const selectedCount = rows.filter((row) => row.selected).length;
   list.innerHTML = '';
-  for (const p of providers) {
-    const row = document.createElement('label');
-    row.className = 'provider-choice' + (p.ok === false ? ' offline' : '');
+  let section = '';
+  for (const p of rows) {
+    const nextSection = p.selected ? 'Cycle order' : 'Available providers';
+    if (nextSection !== section) {
+      const heading = document.createElement('div');
+      heading.className = 'provider-section';
+      heading.textContent = nextSection;
+      list.append(heading);
+      section = nextSection;
+    }
+
+    const row = document.createElement('div');
+    row.className = 'provider-choice' + (p.selected ? ' selected' : ' available') + (p.ok === false ? ' offline' : '');
     const box = document.createElement('input');
     box.type = 'checkbox';
+    box.id = 'provider-' + p.id.replace(/[^a-z0-9_-]/gi, '-');
     box.value = p.id;
-    box.checked = selected.has(p.id);
+    box.checked = p.selected;
+    const label = document.createElement('label');
+    label.htmlFor = box.id;
+    const order = document.createElement('span');
+    order.className = 'provider-order';
+    order.textContent = p.selected ? String(p.order) + '.' : '+';
+    const name = document.createElement('span');
+    name.className = 'provider-name';
+    name.textContent = p.name + (p.ok === false ? ' (unavailable)' : '');
+    label.append(order, name);
+
     box.addEventListener('change', () => {
-      // A switch with no choices cannot select a provider, so keep one selected.
-      if (![...list.querySelectorAll('input:checked')].length) box.checked = true;
-      savedProviderIds = [...list.querySelectorAll('input:checked')].map((el) => el.value);
+      savedProviderIds = ProviderOrder.toggle(providers, savedProviderIds, p.id, box.checked);
+      renderProviders();
       saveNow();
     });
-    row.append(box, document.createTextNode(p.name + (p.ok === false ? ' (unavailable)' : '')));
+
+    const actions = document.createElement('div');
+    actions.className = 'provider-actions';
+    if (p.selected) {
+      const up = document.createElement('button');
+      up.type = 'button'; up.textContent = '↑'; up.title = 'Move ' + p.name + ' up';
+      up.disabled = p.order === 1;
+      up.addEventListener('click', () => {
+        savedProviderIds = ProviderOrder.move(providers, savedProviderIds, p.id, -1);
+        renderProviders(); saveNow();
+      });
+      const down = document.createElement('button');
+      down.type = 'button'; down.textContent = '↓'; down.title = 'Move ' + p.name + ' down';
+      down.disabled = p.order === selectedCount;
+      down.addEventListener('click', () => {
+        savedProviderIds = ProviderOrder.move(providers, savedProviderIds, p.id, 1);
+        renderProviders(); saveNow();
+      });
+      actions.append(up, down);
+    }
+    // Keep input and label adjacent: uspi.css intentionally hides the native
+    // checkbox and paints its visible state through `input + label`.
+    row.append(box, label, actions);
     list.append(row);
   }
 }
@@ -99,6 +136,12 @@ $UD.onConnected(() => {
   document.querySelector('#agentUrl').addEventListener('input', () => { saveDebounced(); scheduleProviderRefresh(); });
   document.querySelector('#theme').addEventListener('change', saveNow);
   document.querySelector('#refresh').addEventListener('change', saveNow);
+  document.querySelector('#resetProviderOrder').addEventListener('click', () => {
+    if (!providers.length) return;
+    savedProviderIds = ProviderOrder.all(providers);
+    renderProviders();
+    saveNow();
+  });
 });
 
 $UD.onAdd((jsn) => { if (jsn && jsn.param) load(jsn.param); });

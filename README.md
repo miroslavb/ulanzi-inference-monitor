@@ -5,9 +5,9 @@ Ulanzi deck keys — a sibling of [ulanzi-system-monitor](https://github.com/mir
 that reuses the same interface model (a **cycler key** + tiles that follow the
 active selection).
 
-**Latest release:** [v1.5.0](https://github.com/miroslavb/ulanzi-inference-monitor/releases/tag/v1.5.0)
-ships both the [Ulanzi Studio plugin](https://github.com/miroslavb/ulanzi-inference-monitor/releases/download/v1.5.0/com.ulanzi.infmonitor.ulanziPlugin-1.5.0.zip)
-and the [standalone inf-agent](https://github.com/miroslavb/ulanzi-inference-monitor/releases/download/v1.5.0/inf-agent-1.5.0.zip).
+**Latest release:** [v1.5.1](https://github.com/miroslavb/ulanzi-inference-monitor/releases/tag/v1.5.1)
+ships both the [Ulanzi Studio plugin](https://github.com/miroslavb/ulanzi-inference-monitor/releases/download/v1.5.1/com.ulanzi.infmonitor.ulanziPlugin-1.5.1.zip)
+and the [standalone inf-agent](https://github.com/miroslavb/ulanzi-inference-monitor/releases/download/v1.5.1/inf-agent-1.5.1.zip).
 
 One key cycles the provider; two tiles show its main numbers, with an optional
 third monthly tile for providers that expose it:
@@ -72,8 +72,16 @@ Double-click the `.zip` (or import it in Ulanzi Studio). Then on the deck:
 2. Drop two **Provider Tile** keys next to it; set one to **Primary** and one to
    **Secondary**.
 3. In the switch settings, tick only the providers that this key should cycle.
-   Older switch settings continue to include all providers. Press the key to cycle
-   the chosen providers; the tiles follow the selection.
+   Selected rows appear under **Cycle order**; use ↑/↓ to set the exact order.
+   Unselected rows remain under **Available providers**, and **All / reset order**
+   restores every provider in the agent's order. Older switch settings continue
+   to include all providers. Press the key to cycle the chosen providers in the
+   saved order; the tiles follow the selection.
+
+If OpenAI was absent from the cycle after installing v1.5.0, it was only omitted
+from that switch's saved allow-list — the agent still returned it. In v1.5.1 it
+remains visible under **Available providers**; tick **OpenAI** or use
+**All / reset order** to restore it.
 
 OpenCode Go exposes three windows. Add a third **Provider Tile** and set it to
 **Monthly** to show its monthly limit; that slot also shows OpenRouter's monthly

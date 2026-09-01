@@ -19,7 +19,7 @@ function agentUrl(v) { return (v && String(v).trim()) || ''; }
 function slot(v) { return v === 'secondary' || v === 'tertiary' ? v : 'primary'; }
 
 // `null` deliberately means "all providers" for settings saved before 1.5.0.
-// An explicit array is an allow-list in the agent's stable response order.
+// An explicit array is both an allow-list AND the switch's cycle order.
 export function providerIds(value) {
   if (!Array.isArray(value)) return null;
   const seen = new Set();
@@ -35,7 +35,9 @@ export function providerIds(value) {
 
 export function visibleProviders(providers, ids) {
   const list = Array.isArray(providers) ? providers.filter((p) => p && p.id) : [];
-  return ids == null ? list : list.filter((p) => ids.includes(p.id));
+  if (ids == null) return list;
+  const byId = new Map(list.map((provider) => [provider.id, provider]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
 }
 
 export function nextProviderId(providers, currentId) {

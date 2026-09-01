@@ -16,10 +16,30 @@
     }
     #property-inspector input[type="text"]::placeholder { color: #7a7f85; }
     .provider-list { margin: 0 12px 10px; display: grid; gap: 5px; }
-    .provider-choice { display: flex; align-items: center; gap: 7px; min-height: 22px; color: #e8e8e8; font-size: 12px; }
-    .provider-choice input { margin: 0; }
+    .provider-section { color: #9aa0a6; font-size: 10px; text-transform: uppercase; margin: 5px 0 1px; }
+    .provider-choice {
+      display: grid; grid-template-columns: minmax(0,1fr) 58px; align-items: center;
+      gap: 6px; min-height: 30px; color: #e8e8e8; font-size: 12px;
+      border: 1px solid #3a3a3a; border-radius: 4px; background: #252629; padding: 3px 5px;
+    }
+    .provider-choice > input + label {
+      display: flex; align-items: center; min-width: 0; min-height: 22px;
+      padding-left: 24px; cursor: pointer; overflow: hidden;
+    }
+    .provider-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .provider-order { color: #00ffe6; min-width: 18px; font-variant-numeric: tabular-nums; }
+    .provider-actions { display: flex; justify-content: flex-end; gap: 4px; }
+    .provider-actions button, #resetProviderOrder {
+      width: 26px; height: 24px; padding: 0; border-radius: 4px;
+      border: 1px solid #6b6b6b; background: #2b2b2b; color: #e8e8e8; line-height: 1;
+    }
+    .provider-actions button:disabled { color: #666; border-color: #454545; cursor: default; }
+    .provider-choice.available { opacity: .82; }
     .provider-choice.offline { color: #e0a23a; }
     .provider-empty { color: #9aa0a6; font-size: 11px; line-height: 1.4; }
+    .provider-toolbar { margin: 0 12px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .provider-toolbar span { color: #9aa0a6; font-size: 11px; }
+    #resetProviderOrder { width: auto; padding: 0 8px; color: #00ffe6; }
   </style>
 </head>
 <body>
@@ -50,6 +70,10 @@
       </div>
 
       <div class="uspi-heading">Providers in this switch</div>
+      <div class="provider-toolbar">
+        <span>Tick to include; use arrows to set cycle order.</span>
+        <button type="button" id="resetProviderOrder">All / reset order</button>
+      </div>
       <div id="providerList" class="provider-list" aria-live="polite">
         <div class="provider-empty">Connecting to the agent…</div>
       </div>
@@ -69,6 +93,7 @@
   <script src="../libs/js/timers.js"></script>
   <script src="../libs/js/utils.js"></script>
   <script src="../libs/js/ulanziApi.js"></script>
+  <script src="./provider-order.js"></script>
   <script src="./switcher.js"></script>
 </body>
 </html>
