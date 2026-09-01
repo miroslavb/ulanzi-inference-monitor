@@ -16,10 +16,37 @@ function clampInt(v, lo, hi, def) {
 }
 function theme(v) { return v === 'light' ? 'light' : 'dark'; }
 function agentUrl(v) { return (v && String(v).trim()) || ''; }
+function slot(v) { return v === 'secondary' || v === 'tertiary' ? v : 'primary'; }
+
+// `null` deliberately means "all providers" for settings saved before 1.5.0.
+// An explicit array is an allow-list in the agent's stable response order.
+export function providerIds(value) {
+  if (!Array.isArray(value)) return null;
+  const seen = new Set();
+  const ids = [];
+  for (const valueId of value) {
+    const id = typeof valueId === 'string' ? valueId.trim() : '';
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+export function visibleProviders(providers, ids) {
+  const list = Array.isArray(providers) ? providers.filter((p) => p && p.id) : [];
+  return ids == null ? list : list.filter((p) => ids.includes(p.id));
+}
+
+export function nextProviderId(providers, currentId) {
+  if (!providers.length) return null;
+  const i = providers.findIndex((p) => p.id === currentId);
+  return providers[(i + 1 + providers.length) % providers.length].id;
+}
 
 export function readTileSettings(param = {}) {
   return {
-    slot: param.slot === 'secondary' ? 'secondary' : 'primary',
+    slot: slot(param.slot),
     theme: theme(param.theme),
     agentUrl: agentUrl(param.agentUrl),
     refresh: clampInt(param.refresh, 2000, 60000, DEFAULT_MS),
@@ -31,5 +58,6 @@ export function readSwitchSettings(param = {}) {
     theme: theme(param.theme),
     agentUrl: agentUrl(param.agentUrl),
     refresh: clampInt(param.refresh, 2000, 60000, DEFAULT_MS),
+    providerIds: providerIds(param.providerIds),
   };
 }

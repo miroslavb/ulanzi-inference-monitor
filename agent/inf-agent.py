@@ -15,21 +15,24 @@ Providers (auto-discovered from the box's credential files; override via env):
   * openai        — Codex ChatGPT usage    (live account rate-limit windows)
   * openrouter    — /credits + /key         (balance + spend today/week/month)
   * nous          — portal JWT claims       (tier, spend, rate limits; free tier)
-  * ollama_cloud  — POST /api/me            (plan + billing-period renewal)
+  * ollama_cloud  — GET /api/usage          (session + weekly usage limits)
+  * opencode_go   — GET /zen/go/v1/usage    (5h + weekly + monthly limits)
 
 Env (all optional — sane defaults for this box):
   INF_AGENT_PORT      listen port            (default 9890)
   INF_AGENT_BIND      bind address           (default 0.0.0.0; set the Tailscale IP to stay on the tailnet)
   INF_AGENT_TOKEN     shared secret          (?token=.. or Authorization: Bearer ..)
   INF_AGENT_INTERVAL  provider poll seconds  (default 60)
-  INF_AGENT_PROVIDERS comma list to enable   (default claude,openai,openrouter,nous,ollama_cloud)
+  INF_AGENT_PROVIDERS comma list to enable   (default claude,openai,openrouter,nous,ollama_cloud,opencode_go)
 
   INF_CLAUDE_CREDS    path to Claude creds   (default /root/.claude/.credentials.json)
   INF_OPENAI_CREDS    path to Codex auth     (default /root/.codex/auth.json)
   INF_HERMES_ENV      path to hermes .env    (default /root/.hermes/.env)
   INF_HERMES_CONFIG   path to hermes config  (default /root/.hermes/config.yaml)
   INF_NOUS_PORTAL     path to nous portal js (default /root/.hermes/nous-portal.json)
-  OPENROUTER_API_KEY / OLLAMA_API_KEY        explicit key overrides (win over file discovery)
+  OPENROUTER_API_KEY / OLLAMA_API_KEY / OPENCODE_GO_API_KEY
+                                              explicit key overrides (win over file discovery)
+  INF_OPENCODE_AUTH   path to OpenCode auth  (default $XDG_DATA_HOME/opencode/auth.json)
 
 Endpoints:
   GET /providers (or /)  -> { ts, agent_host, interval, providers:[ ... ] }
@@ -56,7 +59,7 @@ BIND = os.environ.get("INF_AGENT_BIND", "0.0.0.0")
 TOKEN = os.environ.get("INF_AGENT_TOKEN", "")
 INTERVAL = max(15, int(os.environ.get("INF_AGENT_INTERVAL", "60")))
 ENABLED = [p.strip() for p in os.environ.get(
-    "INF_AGENT_PROVIDERS", "claude,openai,openrouter,nous,ollama_cloud").split(",") if p.strip()]
+    "INF_AGENT_PROVIDERS", "claude,openai,openrouter,nous,ollama_cloud,opencode_go").split(",") if p.strip()]
 
 CLAUDE_CREDS = os.environ.get("INF_CLAUDE_CREDS", "/root/.claude/.credentials.json")
 OPENAI_CREDS = os.environ.get("INF_OPENAI_CREDS", "/root/.codex/auth.json")
@@ -66,8 +69,14 @@ OPENAI_SESSIONS = os.environ.get("INF_OPENAI_SESSIONS", "/root/.codex/sessions")
 HERMES_ENV = os.environ.get("INF_HERMES_ENV", "/root/.hermes/.env")
 HERMES_CONFIG = os.environ.get("INF_HERMES_CONFIG", "/root/.hermes/config.yaml")
 NOUS_PORTAL = os.environ.get("INF_NOUS_PORTAL", "/root/.hermes/nous-portal.json")
+OPENCODE_AUTH = os.environ.get("INF_OPENCODE_AUTH") or os.path.join(
+    os.environ.get("OPENCODE_DATA_DIR") or os.path.join(
+        os.environ.get("XDG_DATA_HOME", "/root/.local/share"), "opencode"),
+    "auth.json")
+OPENCODE_GO_USAGE_URL = os.environ.get(
+    "INF_OPENCODE_GO_USAGE_URL", "https://opencode.ai/zen/go/v1/usage")
 
-UA = "ulanzi-inf-agent/1.4"
+UA = "ulanzi-inf-agent/1.5"
 HTTP_TIMEOUT = 12
 
 _snapshot = {"ts": 0, "agent_host": socket.gethostname(), "interval": INTERVAL, "providers": []}
@@ -172,6 +181,20 @@ def _first_num(*vals):
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _credential_key(path, *ids):
+    """Read a named API key from a local auth JSON without logging its contents."""
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        for ident in ids:
+            entry = data.get(ident) if isinstance(data, dict) else None
+            if isinstance(entry, dict) and entry.get("key"):
+                return str(entry["key"])
+    except (OSError, TypeError, ValueError):
+        pass
+    return ""
 
 
 # ---- provider probes -------------------------------------------------------
@@ -572,30 +595,104 @@ def probe_nous():
     return p
 
 
+def _ollama_usage_window(raw, label):
+    """Convert Ollama's documented 0..1 usage fraction into our limit contract."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        usage = float(raw["usage"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {"pct": round(max(0.0, min(1.0, usage)) * 100, 1), "label": label}
+
+
 def probe_ollama_cloud():
     p = {"id": "ollama_cloud", "name": "Ollama Cloud", "kind": "limit", "icon": "cloud",
-         "ok": False, "note": "no per-window usage API — plan & renewal only"}
+         "ok": False, "session": None, "week": None}
     key = os.environ.get("OLLAMA_API_KEY", "") or _env_value(HERMES_ENV, "OLLAMA_API_KEY") \
         or _yaml_value(HERMES_CONFIG, "providers", "ollama_cloud", "api_key")
     if not key:
         p["error"] = "no OLLAMA_API_KEY"
         return p
     try:
+        usage = _http("GET", "https://ollama.com/api/usage", {"Authorization": "Bearer " + key})
+    except Exception as e:
+        p["error"] = f"usage: {e}"
+        return p
+    limits = usage.get("limits") if isinstance(usage, dict) else None
+    p["session"] = _ollama_usage_window((limits or {}).get("session"), "5H")
+    p["week"] = _ollama_usage_window((limits or {}).get("weekly"), "WEEK")
+    if not (p["session"] or p["week"]):
+        p["error"] = "usage: missing session/weekly limits"
+        return p
+
+    # Profile data remains useful context, but a temporary profile failure must
+    # not hide live limit gauges from the independent /api/usage endpoint.
+    try:
         me = _http("POST", "https://ollama.com/api/me", {"Authorization": "Bearer " + key})
     except Exception as e:
-        p["error"] = f"{e}"
-        return p
-    plan = me.get("Plan") or ""
-    p["plan"] = plan
-    p["headline"] = plan.upper() if plan else "Ollama"
-    p["session"] = None  # not exposed by any Ollama API → tiles fall back to plan/renewal
-    p["week"] = None
-    end = (me.get("SubscriptionPeriodEnd") or {})
-    if end.get("Valid") and end.get("Time"):
+        me = {}
+        p["profile_error"] = str(e)
+    plan = me.get("Plan") if isinstance(me, dict) else ""
+    if plan:
+        p["plan"] = plan
+    p["headline"] = str(plan).upper() if plan else "Ollama"
+    end = (me.get("SubscriptionPeriodEnd") or {}) if isinstance(me, dict) else {}
+    if isinstance(end, dict) and end.get("Valid") and end.get("Time"):
         p["renews_at"] = end["Time"]
         p["renews_in"] = _resets_in(end["Time"])
-    if (me.get("SuspendedAt") or {}).get("Valid"):
+    if isinstance(me, dict) and isinstance(me.get("SuspendedAt"), dict) and me["SuspendedAt"].get("Valid"):
         p["suspended"] = True
+    p["ok"] = True
+    return p
+
+
+def _opencode_go_window(raw, label, seconds):
+    """Normalise OpenCode Go's usage API window into the shared limit shape."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        pct = float(raw["percent"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    reset = raw.get("resetsAt")
+    return {
+        "pct": round(max(0.0, min(100.0, pct)), 1),
+        "label": label,
+        "window_seconds": seconds,
+        "resets_at": reset,
+        "resets_in": _resets_in(reset),
+    }
+
+
+def probe_opencode_go():
+    """OpenCode Go subscription limits from its key-authenticated usage API."""
+    p = {"id": "opencode_go", "name": "OpenCode Go", "kind": "limit", "icon": "console",
+         "ok": False, "session": None, "week": None, "month": None}
+    key = (os.environ.get("OPENCODE_GO_API_KEY", "")
+           or _env_value(HERMES_ENV, "OPENCODE_GO_API_KEY")
+           or _credential_key(OPENCODE_AUTH, "opencode-go", "opencode_go"))
+    if not key:
+        p["error"] = "no OPENCODE_GO_API_KEY (run: opencode auth)"
+        return p
+    try:
+        payload = _http("GET", OPENCODE_GO_USAGE_URL, {"Authorization": "Bearer " + key})
+    except urllib.error.HTTPError as e:
+        p["error"] = ("key rejected (401)" if e.code == 401
+                      else "no Go subscription (403)" if e.code == 403
+                      else f"usage HTTP {e.code}")
+        return p
+    except Exception as e:
+        p["error"] = f"usage: {e}"
+        return p
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    p["session"] = _opencode_go_window((usage or {}).get("rolling"), "5H", 5 * 3600)
+    p["week"] = _opencode_go_window((usage or {}).get("weekly"), "WEEK", 7 * 86400)
+    p["month"] = _opencode_go_window((usage or {}).get("monthly"), "MONTH", 30 * 86400)
+    if not (p["session"] or p["week"] or p["month"]):
+        p["error"] = "usage: missing limit windows"
+        return p
+    p["headline"] = "Go"
     p["ok"] = True
     return p
 
@@ -606,6 +703,7 @@ PROBES = {
     "openrouter": probe_openrouter,
     "nous": probe_nous,
     "ollama_cloud": probe_ollama_cloud,
+    "opencode_go": probe_opencode_go,
 }
 
 

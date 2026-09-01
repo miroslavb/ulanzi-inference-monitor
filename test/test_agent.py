@@ -193,5 +193,100 @@ class NousLiveProbeTest(unittest.TestCase):
         )
 
 
+class OllamaCloudProbeTest(unittest.TestCase):
+    def setUp(self):
+        self.old_http = agent._http
+        self.old_key = os.environ.get("OLLAMA_API_KEY")
+        os.environ["OLLAMA_API_KEY"] = "ollama-test-key"
+
+    def tearDown(self):
+        agent._http = self.old_http
+        if self.old_key is None:
+            os.environ.pop("OLLAMA_API_KEY", None)
+        else:
+            os.environ["OLLAMA_API_KEY"] = self.old_key
+
+    def test_usage_endpoint_populates_live_session_and_weekly_limits(self):
+        calls = []
+
+        def fake_http(method, url, headers=None, body=None):
+            calls.append((method, url, headers))
+            if url.endswith("/api/usage"):
+                return {"limits": {
+                    "session": {"usage": 0.235, "models": []},
+                    "weekly": {"usage": 0.61, "models": []},
+                }}
+            if url.endswith("/api/me"):
+                return {"Plan": "Pro"}
+            self.fail("unexpected URL: " + url)
+
+        agent._http = fake_http
+        result = agent.probe_ollama_cloud()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["session"], {"pct": 23.5, "label": "5H"})
+        self.assertEqual(result["week"], {"pct": 61.0, "label": "WEEK"})
+        self.assertEqual(result["headline"], "PRO")
+        self.assertEqual(calls[0][0:2], ("GET", "https://ollama.com/api/usage"))
+        self.assertEqual(calls[0][2]["Authorization"], "Bearer ollama-test-key")
+
+    def test_profile_failure_does_not_hide_usage(self):
+        def fake_http(method, url, headers=None, body=None):
+            if url.endswith("/api/usage"):
+                return {"limits": {"session": {"usage": 0.1}, "weekly": {"usage": 0.2}}}
+            raise OSError("profile unavailable")
+
+        agent._http = fake_http
+        result = agent.probe_ollama_cloud()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["headline"], "Ollama")
+        self.assertIn("profile unavailable", result["profile_error"])
+
+
+class OpenCodeGoProbeTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.auth_path = Path(self.tmp.name) / "opencode-auth.json"
+        self.auth_path.write_text(json.dumps({"opencode-go": {"type": "api", "key": "go-test-key"}}))
+        self.old_auth = agent.OPENCODE_AUTH
+        self.old_http = agent._http
+        self.old_key = os.environ.get("OPENCODE_GO_API_KEY")
+        os.environ.pop("OPENCODE_GO_API_KEY", None)
+        agent.OPENCODE_AUTH = str(self.auth_path)
+
+    def tearDown(self):
+        agent.OPENCODE_AUTH = self.old_auth
+        agent._http = self.old_http
+        if self.old_key is None:
+            os.environ.pop("OPENCODE_GO_API_KEY", None)
+        else:
+            os.environ["OPENCODE_GO_API_KEY"] = self.old_key
+        self.tmp.cleanup()
+
+    def test_auth_file_and_three_usage_windows_are_normalised(self):
+        captured = {}
+
+        def fake_http(method, url, headers=None, body=None):
+            captured.update(method=method, url=url, headers=headers)
+            return {"usage": {
+                "rolling": {"percent": 12.5, "resetsAt": "2100-01-01T00:00:00Z"},
+                "weekly": {"percent": 34, "resetsAt": "2100-01-03T00:00:00Z"},
+                "monthly": {"percent": 56.75, "resetsAt": "2100-02-01T00:00:00Z"},
+            }}
+
+        agent._http = fake_http
+        result = agent.probe_opencode_go()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["session"]["pct"], 12.5)
+        self.assertEqual(result["session"]["label"], "5H")
+        self.assertEqual(result["week"]["pct"], 34.0)
+        self.assertEqual(result["month"]["pct"], 56.8)
+        self.assertEqual(captured["method"], "GET")
+        self.assertEqual(captured["url"], agent.OPENCODE_GO_USAGE_URL)
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer go-test-key")
+
+
 if __name__ == "__main__":
     unittest.main()

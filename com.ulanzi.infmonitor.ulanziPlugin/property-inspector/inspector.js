@@ -5,7 +5,8 @@ const DEFAULT_AGENT = 'http://127.0.0.1:9890';
 
 function buildSettings() {
   return {
-    slot: document.querySelector('#slot').value === 'secondary' ? 'secondary' : 'primary',
+    slot: ['secondary', 'tertiary'].includes(document.querySelector('#slot').value)
+      ? document.querySelector('#slot').value : 'primary',
     theme: document.querySelector('#theme').value === 'light' ? 'light' : 'dark',
     refresh: parseInt(document.querySelector('#refresh').value, 10) || 5000,
     agentUrl: (document.querySelector('#agentUrl').value || '').trim(),
@@ -16,7 +17,7 @@ const saveDebounced = (typeof Utils !== 'undefined' && Utils.debounce) ? Utils.d
 
 function load(p) {
   p = p || {};
-  document.querySelector('#slot').value = p.slot === 'secondary' ? 'secondary' : 'primary';
+  document.querySelector('#slot').value = ['secondary', 'tertiary'].includes(p.slot) ? p.slot : 'primary';
   document.querySelector('#theme').value = p.theme === 'light' ? 'light' : 'dark';
   document.querySelector('#refresh').value = String(p.refresh || 5000);
   document.querySelector('#agentUrl').value = p.agentUrl || DEFAULT_AGENT;

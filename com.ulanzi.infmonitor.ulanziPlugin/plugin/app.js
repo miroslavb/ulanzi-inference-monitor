@@ -18,7 +18,10 @@ import { fileURLToPath } from 'url';
 import { UlanziApi } from './common-node/index.js';
 import ProviderSampler from './monitor/ProviderSampler.js';
 import { tileDataUri, switchTileDataUri } from './monitor/render.js';
-import { readTileSettings, readSwitchSettings, DEFAULT_MS, DEFAULT_AGENT } from './monitor/settings.js';
+import {
+  readTileSettings, readSwitchSettings, visibleProviders, nextProviderId,
+  DEFAULT_MS, DEFAULT_AGENT,
+} from './monitor/settings.js';
 import { loadAgentUrl, saveAgentUrl } from './monitor/persist.js';
 import { MDI_LITE } from './monitor/mdi-lite.js';
 
@@ -33,7 +36,7 @@ const $UD = new UlanziApi();
 // the backend after a restart (the PI shows them; the backend never gets them).
 const PERSIST_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'monitor', '.agent-url.json');
 const sampler = new ProviderSampler(loadAgentUrl(PERSIST_FILE) || DEFAULT_AGENT);
-let currentIndex = 0;          // which provider in sampler.providers is active
+let currentProviderId = null;  // stable across agent refreshes and provider reordering
 
 // --- instances ---------------------------------------------------------------
 const tiles = {};      // actionid -> { id, context, active, slot, theme, agentUrl, refresh }
@@ -46,7 +49,11 @@ $UD.onConnected(() => {
   $UD.logMessage('Inference Monitor plugin connected', 'info');
   startTimer();
   // Fetch once up front so keys show data without waiting a full interval.
-  sampler.sample().finally(paint);
+  sampler.sample().finally(() => {
+    reconcileActiveProvider();
+    publishProviderChoices();
+    paint();
+  });
 });
 
 function decode(ctx) {
@@ -54,6 +61,39 @@ function decode(ctx) {
   return { id: dec.actionid || ctx, key: dec.key, uuid: dec.uuid || '' };
 }
 function isSwitch(uuid) { return String(uuid).endsWith('.provswitch'); }
+
+function providersFor(inst) {
+  return visibleProviders(sampler.providers, inst ? inst.providerIds : null);
+}
+
+function activeProvider() {
+  return (currentProviderId && sampler.byId[currentProviderId]) || sampler.at(0);
+}
+
+// Prefer the configured allow-list from an existing switch when its selection
+// is available. This also restores a valid selection when the agent's provider
+// list changes while Studio is open.
+function reconcileActiveProvider(preferredSwitch) {
+  const configured = preferredSwitch || Object.values(switches)
+    .find((s) => Array.isArray(s.providerIds));
+  const allowed = configured ? providersFor(configured) : sampler.providers;
+  if (!allowed.length) {
+    currentProviderId = sampler.count() ? sampler.at(0).id : null;
+    return;
+  }
+  if (!allowed.some((p) => p.id === currentProviderId)) currentProviderId = allowed[0].id;
+}
+
+function publishProviderChoices() {
+  const providers = sampler.providers.map((p) => ({
+    id: p.id,
+    name: p.name || p.id,
+    ok: p.ok !== false,
+  }));
+  for (const s of Object.values(switches)) {
+    try { $UD.sendToPropertyInspector({ type: 'providers', providers }, s.context); } catch (e) { /* PI closed */ }
+  }
+}
 
 // Any key may carry the agent address; the latest non-empty one wins.
 // Every applied change is persisted so the next plugin start survives a Studio
@@ -87,7 +127,9 @@ function upsert(jsn) {
     Object.assign(switches[id], readSwitchSettings(jsn.param));
     applyAgentUrl(switches[id].agentUrl);
     pullSettingsIfMissing(jsn, switches[id]);
+    reconcileActiveProvider(switches[id]);
     recomputeRefresh();
+    publishProviderChoices();
     paintSwitch(switches[id]);
   } else {
     if (!tiles[id]) tiles[id] = { id, context: jsn.context, active: true };
@@ -127,10 +169,11 @@ $UD.onClear((jsn) => {
 $UD.onRun((jsn) => {
   const { id, uuid } = decode(jsn.context);
   if (!isSwitch(uuid)) return;          // tiles do nothing on press
-  const n = sampler.count();
-  if (n > 0) currentIndex = (currentIndex + 1) % n;
-  const sel = sampler.at(currentIndex);
-  $UD.logMessage(`provider switch -> ${sel ? sel.name : '?'} (${currentIndex + 1}/${n})`, 'info');
+  const choices = providersFor(switches[id]);
+  currentProviderId = nextProviderId(choices, currentProviderId);
+  const sel = activeProvider();
+  const index = choices.findIndex((p) => p.id === currentProviderId);
+  $UD.logMessage(`provider switch -> ${sel ? sel.name : '?'} (${index + 1}/${choices.length})`, 'info');
   paint();
 });
 
@@ -148,7 +191,8 @@ function startTimer() {
 
 async function tick() {
   try { await sampler.sample(); } catch (e) { /* never throws, but be safe */ }
-  if (sampler.count() > 0) currentIndex = ((currentIndex % sampler.count()) + sampler.count()) % sampler.count();
+  reconcileActiveProvider();
+  publishProviderChoices();
   paint();
 }
 
@@ -159,17 +203,19 @@ function paint() {
 
 function paintTile(inst) {
   if (!inst || inst.active === false) return;
-  const provider = sampler.at(currentIndex);
+  const provider = activeProvider();
   $UD.setBaseDataIcon(inst.context, tileDataUri({ provider, slot: inst.slot, theme: inst.theme }), '');
 }
 
 function paintSwitch(s) {
   if (!s || s.active === false) return;
-  const provider = sampler.at(currentIndex);
+  const provider = activeProvider();
+  const choices = providersFor(s);
+  const index = Math.max(0, choices.findIndex((p) => provider && p.id === provider.id));
   const iconPath = provider ? (MDI_LITE[provider.icon] || MDI_LITE.server || '') : '';
   $UD.setBaseDataIcon(s.context, switchTileDataUri({
     provider, iconPath, theme: s.theme,
-    index: currentIndex, count: sampler.count(),
+    index, count: choices.length,
     offline: !sampler.ok,
   }), '');
 }

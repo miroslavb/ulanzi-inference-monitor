@@ -15,6 +15,11 @@
       border-radius: 4px; height: 28px; padding: 0 8px; box-sizing: border-box; font-size: 13px;
     }
     #property-inspector input[type="text"]::placeholder { color: #7a7f85; }
+    .provider-list { margin: 0 12px 10px; display: grid; gap: 5px; }
+    .provider-choice { display: flex; align-items: center; gap: 7px; min-height: 22px; color: #e8e8e8; font-size: 12px; }
+    .provider-choice input { margin: 0; }
+    .provider-choice.offline { color: #e0a23a; }
+    .provider-empty { color: #9aa0a6; font-size: 11px; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -44,11 +49,16 @@
         </select>
       </div>
 
+      <div class="uspi-heading">Providers in this switch</div>
+      <div id="providerList" class="provider-list" aria-live="polite">
+        <div class="provider-empty">Connecting to the agent…</div>
+      </div>
+
       <div class="hint" data-localize="SwitchHint">
         Run <b>inf-agent</b> on the host that holds your provider keys (see the project
         README) and enter its address, e.g. <code>http://100.x.y.z:9890</code> over
-        Tailscale. Pressing this key cycles the active provider; the <b>Provider Tiles</b>
-        follow it.
+        Tailscale. Choose the providers this switch should cycle below; the <b>Provider Tiles</b>
+        follow its active selection.
       </div>
 
     </form>

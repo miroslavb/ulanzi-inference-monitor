@@ -1,7 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.5.0
 
+- **Ollama Cloud usage limits.** The agent now reads the authenticated
+  `GET /api/usage` session and weekly fractions and sends them as live gauges.
+  The API supplies no reset timestamps, so the deck deliberately shows no made-up
+  countdown. Profile/renewal metadata remains a non-blocking `POST /api/me` read.
+- **OpenCode Go provider.** Reads `OPENCODE_GO_API_KEY` or OpenCode's local auth
+  JSON and renders the official rolling 5-hour, weekly and monthly usage windows.
+  The new optional Monthly Provider Tile slot shows the third window.
+- **Per-switch provider selection.** Provider Switch settings now list the
+  providers returned by the agent as checkboxes; each switch cycles only its
+  selected allow-list. Existing saved switches retain their all-provider behavior.
 - Treat Hermes's structured `logged_in:false` Nous response as the supported
   configured-fallback state, not as a malformed `no json` fetch failure. Retry
   login discovery every 15 minutes and log the fallback notice once per agent

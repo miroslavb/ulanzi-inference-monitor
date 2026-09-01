@@ -35,8 +35,12 @@ const s = new ProviderSampler(URL);
 await s.sample();
 
 check(s.ok, `sampler reachable (${URL})`);
-check(s.count() === 5, `5 providers (got ${s.count()}: ${s.providers.map(p => p.id).join(',')})`);
+const expected = ['claude', 'openai', 'openrouter', 'nous', 'ollama_cloud', 'opencode_go'];
+check(s.count() === expected.length, `${expected.length} providers (got ${s.count()}: ${s.providers.map(p => p.id).join(',')})`);
+for (const id of expected) check(s.providers.some((p) => p.id === id), `${id} provider is present`);
 check(s.providers.some(p => p.id === 'openai' && p.ok), 'OpenAI usage provider is live');
+check(s.providers.some(p => p.id === 'ollama_cloud' && p.ok && p.session && p.week), 'Ollama Cloud limits are live');
+check(s.providers.some(p => p.id === 'opencode_go' && p.ok && p.session && p.week && p.month), 'OpenCode Go limits are live');
 
 const cards = [];
 for (let i = 0; i < s.count(); i++) {
@@ -56,8 +60,8 @@ for (let i = 0; i < s.count(); i++) {
   if (p.ok === false) {
     check(ap.includes('⚠') || ap.includes('&#9888;'), `${p.id} primary surfaces provider error`);
   } else if (p.kind === 'limit' && p.session) {
-    check(ap.includes('SESSION') && ap.includes('%'), `${p.id} primary = session %`);
-    check(bp.includes('WEEK'), `${p.id} secondary = week`);
+    check(ap.includes(p.session.label || 'SESSION') && ap.includes('%'), `${p.id} primary = session %`);
+    check(bp.includes((p.week && p.week.label) || 'WEEK'), `${p.id} secondary = week`);
   } else if (p.kind === 'limit') {
     check(ap.includes('plan') || ap.includes(p.headline || '###'), `${p.id} primary = plan fallback`);
   } else if (p.kind === 'balance') {

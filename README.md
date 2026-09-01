@@ -11,7 +11,8 @@ One key cycles the provider; two tiles show its numbers:
 |----------|------|--------------|----------------|
 | **Claude** (Anthropic) | limits | Session (5h) % + reset | Week (7d) % + reset |
 | **OpenAI** (Codex) | limits | Short window % or plan | Long window % + reset |
-| **Ollama Cloud** | limits | Plan | Renews in… |
+| **Ollama Cloud** | limits | Session (5h) % | Week (7d) % |
+| **OpenCode Go** | limits | Rolling 5h % + reset | Week % + reset (monthly on a third tile) |
 | **OpenRouter** | balance | Balance ($) | Spend today / week |
 | **Nous** | balance | Free / tier | Rate limit (rpm/tpm) |
 
@@ -65,8 +66,13 @@ Double-click the `.zip` (or import it in Ulanzi Studio). Then on the deck:
    host's Tailscale address, e.g. `http://100.x.y.z:9890`.
 2. Drop two **Provider Tile** keys next to it; set one to **Primary** and one to
    **Secondary**.
-3. Press the switch to cycle Claude → OpenAI → OpenRouter → Nous → Ollama Cloud.
-   The tiles follow the selection.
+3. In the switch settings, tick only the providers that this key should cycle.
+   Older switch settings continue to include all providers. Press the key to cycle
+   the chosen providers; the tiles follow the selection.
+
+OpenCode Go exposes three windows. Add a third **Provider Tile** and set it to
+**Monthly** to show its monthly limit; that slot also shows OpenRouter's monthly
+spend when available.
 
 (You can also set the agent address on a Provider Tile, so a lone tile works
 without a switch — the most recently configured address wins.)
@@ -84,8 +90,14 @@ without a switch — the most recently configured address wins.)
   the plan on the first tile and the weekly gauge on the second. If the endpoint
   is briefly unavailable, the newest local Codex rate-limit snapshot is shown as
   stale until live polling recovers.
-- **Ollama Cloud** exposes no per-window usage via any API, so its limit tiles show
-  plan + renewal date rather than a session/week %.
+- **Ollama Cloud** exposes live session and weekly fractions at its authenticated
+  `GET /api/usage` endpoint. The endpoint does not include reset timestamps, so
+  its gauges intentionally do not invent a countdown. Plan/renewal metadata still
+  comes from `POST /api/me` when available.
+- **OpenCode Go** reads its key (prefer `OPENCODE_GO_API_KEY`, otherwise OpenCode's
+  local `auth.json`) and uses `GET /zen/go/v1/usage` for rolling 5-hour, weekly,
+  and monthly percentages and reset times. A rejected key or missing subscription
+  is isolated to that provider and does not interrupt the other tiles.
 - **Nous** rate limits/tier come from the portal JWT (no network call). Real plan +
   purchased balance are read **live** from the portal account API by delegating to
   hermes's own `get_nous_portal_account_info()` (run in the hermes venv) — hermes owns

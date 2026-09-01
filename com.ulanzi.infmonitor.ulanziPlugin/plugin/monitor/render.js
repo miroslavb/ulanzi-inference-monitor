@@ -1,8 +1,9 @@
 // render.js — inference-provider tiles as SVG (pure string templating, no deps).
 //
 // Two tile shapes, picked from the active provider's `kind`:
-//   * limit   (claude, openai, ollama_cloud) — a ring gauge of % utilisation, with the
-//     reset countdown beneath. Primary slot = session (5h), secondary = week (7d).
+//   * limit   (claude, openai, ollama_cloud, opencode_go) — a ring gauge of %
+//     utilisation, with the reset countdown beneath. Primary slot = session,
+//     secondary = week and tertiary = month (when the provider exposes it).
 //     When a window has no live %, the ring is replaced by a plan/renewal card.
 //   * balance (openrouter, nous)     — a value card. Primary slot = balance,
 //     secondary slot = spend today/week (or rate limits for a free tier).
@@ -104,14 +105,14 @@ function bottomNote(t, txt, color) {
 
 /**
  * Render one metric tile for the active provider.
- * @param {object} o  { provider, slot:'primary'|'secondary', theme }
+ * @param {object} o  { provider, slot:'primary'|'secondary'|'tertiary', theme }
  */
 export function tileDataUri(o) {
   const t = THEMES[o.theme] || THEMES.dark;
   const bg = `<rect x="0" y="0" width="${CELL}" height="${CELL}" fill="${t.bg}"/>`;
   const frame = `<rect x="0.5" y="0.5" width="${CELL - 1}" height="${CELL - 1}" rx="6" fill="none" stroke="${t.grid}" stroke-width="1"/>`;
   const p = o.provider;
-  const slot = o.slot === 'secondary' ? 'secondary' : 'primary';
+  const slot = o.slot === 'secondary' || o.slot === 'tertiary' ? o.slot : 'primary';
 
   if (!p) {
     return svg(bg + header(t, 'INFERENCE') + valueCard(t, '…', 'connecting', t.sub, 22) + frame);
@@ -126,16 +127,16 @@ export function tileDataUri(o) {
 }
 
 function limitTile(t, p, slot) {
-  const win = slot === 'primary' ? p.session : p.week;
-  const label = (win && win.label) || (slot === 'primary' ? 'SESSION' : 'WEEK');
+  const win = slot === 'primary' ? p.session : slot === 'secondary' ? p.week : p.month;
+  const fallback = slot === 'primary' ? 'SESSION' : slot === 'secondary' ? 'WEEK' : 'MONTH';
+  const label = (win && win.label) || fallback;
   let s = header(t, label);
   if (win && typeof win.pct === 'number') {
     s += ring(t, win.pct, Math.round(win.pct) + '%');
-    s += bottomNote(t, '↻ ' + (win.resets_in || ''));
+    if (win.resets_in) s += bottomNote(t, '↻ ' + win.resets_in);
   } else {
-    // No live window (e.g. Ollama has no usage API): show plan + renewal instead.
     const head = slot === 'primary' ? (p.headline || p.plan || '—') : (p.renews_in ? 'in ' + p.renews_in : '—');
-    const sub = slot === 'primary' ? 'plan' : 'renews';
+    const sub = slot === 'primary' ? 'plan' : slot === 'secondary' ? 'renews' : 'not available';
     s += valueCard(t, head, sub, t.text);
   }
   return s;
@@ -150,6 +151,12 @@ function balanceTile(t, p, slot) {
     else if (p.plan) { big = p.plan; sub = 'plan'; }
     else { big = '—'; sub = truncate(p.name || '', 12); color = t.sub; }
     return header(t, 'BALANCE') + valueCard(t, big, sub, color);
+  }
+  if (slot === 'tertiary') {
+    if (typeof p.spend_month === 'number') {
+      return header(t, 'SPEND') + valueCard(t, money(p.spend_month), 'this month', t.text);
+    }
+    return header(t, 'MONTH') + valueCard(t, '—', 'not available', t.sub);
   }
   // Secondary: spend today/week, or rate limits for a free provider with no $.
   if (typeof p.spend_today === 'number' || typeof p.spend_week === 'number') {
