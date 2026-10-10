@@ -87,8 +87,28 @@ OpenCode Go exposes three windows. Add a third **Provider Tile** and set it to
 **Monthly** to show its monthly limit; that slot also shows OpenRouter's monthly
 spend when available.
 
-(You can also set the agent address on a Provider Tile, so a lone tile works
-without a switch — the most recently configured address wins.)
+The Provider Switch owns the shared agent address when one is configured.
+Provider Tiles follow it, even if an older tile still contains the localhost
+default. Without a configured switch, a standalone tile uses its own address.
+The address is persisted for startup without opening the Property Inspector.
+
+## Local startup hotfix — v1.5.2, 2026-10-10 (software verified)
+
+The installed Windows Studio 3.3.9 plugin uses the configured Provider Switch as
+owner of the shared agent endpoint; a restored tile's localhost default cannot
+override it. Fresh-process startup tests and the approved final software checks
+passed. A passive capture at 19:11:44–19:12:04 UTC observed five automatic
+`GET /providers` requests from Windows, each answered with HTTP 200. The installed
+app hash still matches the tested source. No URL/input interaction was used for
+these checks. [Source: final test output, Windows read-back and bounded passive
+HTTP capture, 2026-10-10]
+
+Independent read-only review approved the hotfix. Physical-panel appearance was
+not observed remotely. The live preview retains a separate failed Ollama Cloud
+live-limits assertion; upstream provider errors remain visible, not replaced with
+invented readings. v1.5.2 is a local plugin build/source hotfix, not a new published
+GitHub release asset. See [evidence and limitations](docs/STARTUP_HOTFIX_2026-10-10.md).
+[Source: completed review, live preview and release scope, 2026-10-10]
 
 ## Notes & limitations
 

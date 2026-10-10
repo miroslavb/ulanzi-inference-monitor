@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.2
+
+- The configured Provider Switch now owns the shared agent URL. A restored
+  Provider Tile with the localhost default cannot redirect the whole monitor
+  away from the real agent. Standalone tiles retain their own URL support.
+- Settings replies prefer the SDK `settings` envelope over an empty `param`,
+  allowing cold-start hydration without opening or focusing the inspector.
+- Added fresh-process startup tests against the real Node app, bundled SDK,
+  WebSocket host and HTTP agent; no inspector/input event is used.
+
 ## 1.5.1
 
 - **Working provider editor.** Provider rows now use the Ulanzi PI's required

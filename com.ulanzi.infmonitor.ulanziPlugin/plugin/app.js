@@ -135,7 +135,9 @@ function upsert(jsn) {
     if (!tiles[id]) tiles[id] = { id, context: jsn.context, active: true };
     tiles[id].context = jsn.context;
     Object.assign(tiles[id], readTileSettings(jsn.param));
-    applyAgentUrl(tiles[id].agentUrl);
+    // The switch owns the shared endpoint. Restored tile defaults must not
+    // redirect every key to localhost; lone tiles still supply their own URL.
+    if (!Object.values(switches).some((s) => s.agentUrl)) applyAgentUrl(tiles[id].agentUrl);
     pullSettingsIfMissing(jsn, tiles[id]);
     recomputeRefresh();
     paintTile(tiles[id]);
@@ -148,7 +150,7 @@ $UD.onParamFromApp((jsn) => upsert(jsn));
 // Reply to our getSettings pull; Studio may put the payload in `param` or `settings`.
 $UD.onDidReceiveSettings((jsn) => {
   if (!jsn || !jsn.context) return;
-  upsert({ context: jsn.context, param: jsn.param || jsn.settings || {} });
+  upsert({ context: jsn.context, param: jsn.settings || jsn.param || {} });
 });
 
 $UD.onSetActive((jsn) => {
