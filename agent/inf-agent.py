@@ -15,7 +15,7 @@ Providers (auto-discovered from the box's credential files; override via env):
   * openai        — Codex ChatGPT usage    (live account rate-limit windows)
   * openrouter    — /credits + /key         (balance + spend today/week/month)
   * nous          — portal JWT claims       (tier, spend, rate limits; free tier)
-  * ollama_cloud  — GET /api/usage          (session + weekly usage limits)
+  * ollama_cloud  — GET /api/balance        (credits left + spend; legacy 5h/weekly)
   * opencode_go   — GET /zen/go/v1/usage    (5h + weekly + monthly limits)
 
 Env (all optional — sane defaults for this box):
@@ -49,7 +49,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -595,8 +595,13 @@ def probe_nous():
     return p
 
 
+OLLAMA_BALANCE_URL = "https://ollama.com/api/balance"
+OLLAMA_USAGE_URL = "https://ollama.com/api/usage"
+OLLAMA_ME_URL = "https://ollama.com/api/me"
+
+
 def _ollama_usage_window(raw, label):
-    """Convert Ollama's documented 0..1 usage fraction into our limit contract."""
+    """Pre-2026-10-07 `/api/usage` shape: a 0..1 *used* fraction per window."""
     if not isinstance(raw, dict):
         return None
     try:
@@ -606,7 +611,57 @@ def _ollama_usage_window(raw, label):
     return {"pct": round(max(0.0, min(1.0, usage)) * 100, 1), "label": label}
 
 
+def _ollama_legacy_window(raw, label):
+    """`/api/balance` legacy-plan window: `remaining_percent` 0..100 + `resets_at`."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        remaining = float(raw["remaining_percent"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    w = {"pct": round(max(0.0, min(100.0, 100.0 - remaining)), 1), "label": label}
+    if raw.get("resets_at"):
+        w["resets_at"] = raw["resets_at"]
+        w["resets_in"] = _resets_in(raw["resets_at"])
+    return w
+
+
+def _ollama_spend(key):
+    """Best-effort spend from `/api/usage` (7-day daily buckets since 2026-10-07).
+
+    Returns (spend_today, spend_week) in USD or (None, None). Older accounts still
+    answer with the legacy `limits` shape — that is returned as the 3rd value so
+    the caller can fall back to it when `/api/balance` is unavailable."""
+    usage = _http("GET", OLLAMA_USAGE_URL, {"Authorization": "Bearer " + key})
+    if not isinstance(usage, dict):
+        return None, None, None
+    today = week = None
+    totals = usage.get("totals")
+    if isinstance(totals, dict):
+        week = _first_num(totals.get("usage_usd"))
+    buckets = usage.get("buckets")
+    if isinstance(buckets, list) and buckets:
+        now = datetime.now(timezone.utc)
+        for b in buckets:
+            f, u = _iso_to_dt((b or {}).get("from")), _iso_to_dt((b or {}).get("until"))
+            if f and u and f <= now <= u + timedelta(minutes=1):
+                today = _first_num(b.get("usage_usd"))
+        if today is None:
+            today = _first_num((buckets[-1] or {}).get("usage_usd"))
+    return today, week, usage.get("limits")
+
+
 def probe_ollama_cloud():
+    """Ollama Cloud quota.
+
+    Source of truth is the documented `GET /api/balance` (Bearer API key,
+    10 req/min/user). Since 2026-08-31 plans are credit-based: `included`
+    = {balance_usd, allowance_usd, period} → rendered as a *balance* provider
+    (credits left, spend today/week/period, renewal countdown). Plans started
+    before that switch keep `included.session/weekly` {remaining_percent,
+    resets_at} → rendered as a *limit* provider (5H + WEEK rings with resets).
+    `/api/usage` lost its `limits` block on 2026-10-07 and now only reports spend;
+    its legacy shape is kept as a last-resort fallback."""
     p = {"id": "ollama_cloud", "name": "Ollama Cloud", "kind": "limit", "icon": "cloud",
          "ok": False, "session": None, "week": None}
     key = os.environ.get("OLLAMA_API_KEY", "") or _env_value(HERMES_ENV, "OLLAMA_API_KEY") \
@@ -614,31 +669,89 @@ def probe_ollama_cloud():
     if not key:
         p["error"] = "no OLLAMA_API_KEY"
         return p
+    auth = {"Authorization": "Bearer " + key}
+
+    balance_err = None
     try:
-        usage = _http("GET", "https://ollama.com/api/usage", {"Authorization": "Bearer " + key})
+        bal = _http("GET", OLLAMA_BALANCE_URL, auth)
+    except urllib.error.HTTPError as e:
+        bal, balance_err = None, {401: "key rejected (401)", 403: "account suspended (403)",
+                                  429: "rate limited (429)"}.get(e.code, f"balance HTTP {e.code}")
     except Exception as e:
-        p["error"] = f"usage: {e}"
-        return p
-    limits = usage.get("limits") if isinstance(usage, dict) else None
-    p["session"] = _ollama_usage_window((limits or {}).get("session"), "5H")
-    p["week"] = _ollama_usage_window((limits or {}).get("weekly"), "WEEK")
-    if not (p["session"] or p["week"]):
-        p["error"] = "usage: missing session/weekly limits"
+        bal, balance_err = None, f"balance: {e}"
+
+    spend_today = spend_week = legacy_limits = None
+    try:
+        spend_today, spend_week, legacy_limits = _ollama_spend(key)
+    except Exception as e:
+        p["usage_error"] = str(e)
+
+    included = (bal or {}).get("included") if isinstance(bal, dict) else None
+    purchased = _first_num(((bal or {}).get("purchased") or {}).get("balance_usd")) \
+        if isinstance(bal, dict) else None
+    if isinstance(included, dict) and ("session" in included or "weekly" in included):
+        # Legacy plan: session + weekly windows with real reset times.
+        p["session"] = _ollama_legacy_window(included.get("session"), "5H")
+        p["week"] = _ollama_legacy_window(included.get("weekly"), "WEEK")
+        p["billing"] = "legacy"
+    elif isinstance(included, dict) and _first_num(included.get("balance_usd")) is not None:
+        inc_bal = _first_num(included.get("balance_usd"))
+        allowance = _first_num(included.get("allowance_usd"))
+        p.update({"kind": "balance", "currency": "USD", "billing": "credits",
+                  "included_balance": round(inc_bal, 2),
+                  "balance": round(inc_bal + (purchased or 0.0), 2)})
+        if allowance:
+            p["allowance"] = round(allowance, 2)
+            used = max(0.0, allowance - inc_bal)
+            p["spend_month"] = round(used, 2)
+            win = {"pct": round(max(0.0, min(100.0, used / allowance * 100)), 1), "label": "MONTH"}
+            period = included.get("period") or {}
+            if period.get("until"):
+                win["resets_at"] = period["until"]
+                win["resets_in"] = _resets_in(period["until"])
+                p["renews_at"] = period["until"]
+                p["renews_in"] = win["resets_in"]
+            p["month"] = win
+        if spend_today is not None:
+            p["spend_today"] = round(spend_today, 2)
+        if spend_week is not None:
+            p["spend_week"] = round(spend_week, 2)
+    elif isinstance(legacy_limits, dict):
+        p["session"] = _ollama_usage_window(legacy_limits.get("session"), "5H")
+        p["week"] = _ollama_usage_window(legacy_limits.get("weekly"), "WEEK")
+        p["billing"] = "legacy-usage"
+    if purchased is not None:
+        p["purchased_balance"] = round(purchased, 2)
+
+    if p["kind"] == "limit" and not (p["session"] or p["week"]):
+        p["error"] = balance_err or "balance: no included credits or limits in response"
         return p
 
     # Profile data remains useful context, but a temporary profile failure must
-    # not hide live limit gauges from the independent /api/usage endpoint.
+    # not hide live credits/limits from the independent /api/balance endpoint.
     try:
-        me = _http("POST", "https://ollama.com/api/me", {"Authorization": "Bearer " + key})
+        me = _http("POST", OLLAMA_ME_URL, auth)
     except Exception as e:
         me = {}
         p["profile_error"] = str(e)
     plan = me.get("Plan") if isinstance(me, dict) else ""
-    if plan:
-        p["plan"] = plan
-    p["headline"] = str(plan).upper() if plan else "Ollama"
+    plan = str(plan).strip().capitalize() if plan else ""
+    if p["kind"] == "balance":
+        # Balance tile caption = plan; carry the monthly allowance with it.
+        allowance = p.get("allowance")
+        tag = f"${allowance:g}/mo" if allowance else ""
+        p["plan"] = " · ".join(x for x in (plan, tag) if x) or "credits"
+        p["headline"] = "$%.2f" % p["balance"]
+        if p["balance"] <= 0:
+            p["limit_reached"] = True
+    else:
+        if plan:
+            p["plan"] = plan
+        p["headline"] = plan.upper() if plan else "Ollama"
+        if any((w or {}).get("pct", 0) >= 100 for w in (p["session"], p["week"])):
+            p["limit_reached"] = True
     end = (me.get("SubscriptionPeriodEnd") or {}) if isinstance(me, dict) else {}
-    if isinstance(end, dict) and end.get("Valid") and end.get("Time"):
+    if isinstance(end, dict) and end.get("Valid") and end.get("Time") and "renews_at" not in p:
         p["renews_at"] = end["Time"]
         p["renews_in"] = _resets_in(end["Time"])
     if isinstance(me, dict) and isinstance(me.get("SuspendedAt"), dict) and me["SuspendedAt"].get("Valid"):

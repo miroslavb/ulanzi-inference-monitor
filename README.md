@@ -16,7 +16,7 @@ third monthly tile for providers that expose it:
 |----------|------|--------------|----------------|
 | **Claude** (Anthropic) | limits | Session (5h) % + reset | Week (7d) % + reset |
 | **OpenAI** (Codex) | limits | Short window % or plan | Long window % + reset |
-| **Ollama Cloud** | limits | Session (5h) % | Week (7d) % |
+| **Ollama Cloud** | balance (credit plans) / limits (legacy) | Credits left ($) · plan + allowance, or Session (5h) % + reset | Spend today / week, or Week (7d) % + reset |
 | **OpenCode Go** | limits | Rolling 5h % + reset | Week % + reset (monthly on a third tile) |
 | **OpenRouter** | balance | Balance ($) | Spend today / week |
 | **Nous** | balance | Free / tier | Rate limit (rpm/tpm) |
@@ -104,9 +104,10 @@ these checks. [Source: final test output, Windows read-back and bounded passive
 HTTP capture, 2026-10-10]
 
 Independent read-only review approved the hotfix. Physical-panel appearance was
-not observed remotely. The live preview retains a separate failed Ollama Cloud
-live-limits assertion; upstream provider errors remain visible, not replaced with
-invented readings. v1.5.2 is a local plugin build/source hotfix, not a new published
+not observed remotely. The live preview then retained a separate failed Ollama Cloud
+live-limits assertion; it was fixed on 2026-11-02 by moving the agent to Ollama's
+`/api/balance` (see CHANGELOG). Upstream provider errors remain visible, not
+replaced with invented readings. v1.5.2 is a local plugin build/source hotfix, not a new published
 GitHub release asset. See [evidence and limitations](docs/STARTUP_HOTFIX_2026-10-10.md).
 [Source: completed review, live preview and release scope, 2026-10-10]
 
@@ -123,10 +124,13 @@ GitHub release asset. See [evidence and limitations](docs/STARTUP_HOTFIX_2026-10
   the plan on the first tile and the weekly gauge on the second. If the endpoint
   is briefly unavailable, the newest local Codex rate-limit snapshot is shown as
   stale until live polling recovers.
-- **Ollama Cloud** exposes live session and weekly fractions at its authenticated
-  `GET /api/usage` endpoint. The endpoint does not include reset timestamps, so
-  its gauges intentionally do not invent a countdown. Plan/renewal metadata still
-  comes from `POST /api/me` when available.
+- **Ollama Cloud** quota comes from the documented `GET /api/balance` (Bearer API
+  key, 10 req/min). Credit-based plans (since 2026-08-31) render as a balance:
+  credits left with the plan and monthly allowance as caption, spend today/week
+  from `GET /api/usage` (7-day buckets), spend in the billing period on the monthly
+  tile and the renewal countdown. Legacy plans render 5H/WEEK gauges with real
+  reset times. `/api/usage` stopped returning `limits` on 2026-10-07; that shape is
+  only a fallback. Plan name comes from `POST /api/me` when available.
 - **OpenCode Go** reads its key (prefer `OPENCODE_GO_API_KEY`, otherwise OpenCode's
   local `auth.json`) and uses `GET /zen/go/v1/usage` for rolling 5-hour, weekly,
   and monthly percentages and reset times. A rejected key or missing subscription

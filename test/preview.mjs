@@ -39,7 +39,9 @@ const expected = ['claude', 'openai', 'openrouter', 'nous', 'ollama_cloud', 'ope
 check(s.count() === expected.length, `${expected.length} providers (got ${s.count()}: ${s.providers.map(p => p.id).join(',')})`);
 for (const id of expected) check(s.providers.some((p) => p.id === id), `${id} provider is present`);
 check(s.providers.some(p => p.id === 'openai' && p.ok), 'OpenAI usage provider is live');
-check(s.providers.some(p => p.id === 'ollama_cloud' && p.ok && p.session && p.week), 'Ollama Cloud limits are live');
+check(s.providers.some(p => p.id === 'ollama_cloud' && p.ok &&
+  ((p.kind === 'balance' && typeof p.balance === 'number') || (p.kind === 'limit' && p.session && p.week))),
+  'Ollama Cloud credits/limits are live');
 check(s.providers.some(p => p.id === 'opencode_go' && p.ok && p.session && p.week && p.month), 'OpenCode Go limits are live');
 
 const cards = [];

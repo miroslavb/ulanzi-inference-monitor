@@ -1,5 +1,22 @@
 # Changelog
 
+## Agent 2026-11-02 — Ollama Cloud credits (agent-only; plugin 1.5.2 unchanged)
+
+- **Ollama Cloud reads the documented `GET /api/balance`.** On 2026-10-07 Ollama
+  removed the `limits` block from `/api/usage` (it now returns 7-day spend
+  buckets only), so the deck showed `usage: missing session/weekly limits`.
+- **Credit-based plans** (all plans since 2026-08-31: `included.balance_usd`,
+  `allowance_usd`, `period`) are now sent as a `balance` provider: credits left
+  (included + purchased) with `Pro · $60/mo` as the caption, spend today/week from
+  `/api/usage` buckets, spend in the current billing period on the monthly tile,
+  and the period end as `renews_in`. An empty balance is flagged `limit_reached`.
+- **Legacy plans** (`included.session/weekly.remaining_percent` + `resets_at`)
+  keep the 5H/WEEK `limit` gauges, now with real reset countdowns.
+- The old `/api/usage` `limits` shape is kept only as a fallback when
+  `/api/balance` is unreachable; `/api/me` remains non-blocking plan metadata.
+- Agent tests now sandbox every credential path, so a failing assertion can
+  never print a real key from the host's `.env` or auth files.
+
 ## 1.5.2
 
 - The configured Provider Switch now owns the shared agent URL. A restored

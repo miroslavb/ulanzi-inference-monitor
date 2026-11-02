@@ -30,7 +30,7 @@ curl http://<host>:9890/providers | python3 -m json.tool
 Each `providers[]` entry:
 
 ```jsonc
-// kind:"limit" (Claude, OpenAI, Ollama Cloud)
+// kind:"limit" (Claude, OpenAI, Ollama Cloud legacy plans, OpenCode Go)
 { "id":"claude", "name":"Claude", "kind":"limit", "icon":"robot", "ok":true,
   "headline":"Max 20x",
   "session":{ "pct":8.0, "resets_at":"…", "resets_in":"4h 15m" },   // 5-hour window
@@ -56,9 +56,12 @@ Each `providers[]` entry:
   "spend_today":0.02, "spend_week":0.03, "spend_month":19.51, "headline":"$8.29" }
 ```
 
-Ollama Cloud's authenticated `GET /api/usage` now supplies `session` and `week`
-fractions. It does not include reset timestamps, so those windows omit
-`resets_at` / `resets_in` rather than guessing. Nous reports its live plan and
+Ollama Cloud reads `GET /api/balance`. Credit-based plans arrive as
+`kind:"balance"` (`balance` = included + purchased credits, `allowance`,
+`spend_today`/`spend_week` from `/api/usage` buckets, `spend_month` = allowance −
+included balance, `month` window and `renews_in` from the billing period, `plan`
+like `Pro · $60/mo`). Legacy plans arrive as `kind:"limit"` with 5H/WEEK windows
+computed from `remaining_percent`, including `resets_at` / `resets_in`. Nous reports its live plan and
 balance through hermes's account helper, with rate fields decoded from the portal
 JWT as a secondary detail.
 
@@ -93,7 +96,7 @@ JWT as a secondary detail.
 | **OpenAI** | `GET chatgpt.com/backend-api/wham/usage` (Bearer + ChatGPT account id from Codex auth) | Reads the same account-limit payload used by the official Codex CLI. The agent never refreshes or writes auth. Actual window duration controls the tile label; recent local Codex JSONL is the offline fallback. |
 | **OpenRouter** | `GET /api/v1/credits` + `/api/v1/key` | balance = `total_credits − total_usage`; spend from `usage_daily/weekly/monthly`. |
 | **Nous** | rate limits/tier from portal JWT; plan + balance **live** via hermes's `get_nous_portal_account_info()` (run in the hermes venv) | hermes owns the single-use token refresh/persist/locking; the agent never calls the Nous refresh endpoint. Falls back to `INF_NOUS_PLAN`/`INF_NOUS_BALANCE` if hermes has no Nous session. |
-| **Ollama Cloud** | `GET ollama.com/api/usage` + `POST /api/me` | Live `limits.session/weekly.usage` fractions (0–1) plus optional plan/renewal metadata. The usage endpoint does not return resets. |
+| **Ollama Cloud** | `GET ollama.com/api/balance` + `GET /api/usage` + `POST /api/me` | `/api/balance` is the quota source: credit plans → balance provider (credits left, allowance, billing period); legacy plans → 5H/WEEK `remaining_percent` + `resets_at`. `/api/usage` supplies 7-day spend buckets (its pre-2026-10-07 `limits` shape is a fallback only). `/api/me` adds the plan name. |
 | **OpenCode Go** | `GET opencode.ai/zen/go/v1/usage` | `rolling`, `weekly`, and `monthly` percentage windows plus resets; key from `OPENCODE_GO_API_KEY` or local OpenCode auth JSON. |
 
 ## Install as a service (systemd)

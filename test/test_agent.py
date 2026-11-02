@@ -14,6 +14,20 @@ SPEC = importlib.util.spec_from_file_location("inf_agent", ROOT / "agent" / "inf
 agent = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(agent)
 
+# Never let a test read the host's real credential files: a failing assertion
+# would print the real key (2026-11-02: OPENCODE_GO_API_KEY appeared in hermes
+# .env and leaked into a failure message). Point every discovery path at an
+# empty sandbox and drop provider-key env overrides for the whole run.
+_CRED_SANDBOX = tempfile.TemporaryDirectory()
+agent.HERMES_ENV = os.path.join(_CRED_SANDBOX.name, "hermes.env")
+agent.HERMES_CONFIG = os.path.join(_CRED_SANDBOX.name, "config.yaml")
+agent.OPENCODE_AUTH = os.path.join(_CRED_SANDBOX.name, "opencode-auth.json")
+agent.CLAUDE_CREDS = os.path.join(_CRED_SANDBOX.name, "claude-credentials.json")
+agent.OPENAI_CREDS = os.path.join(_CRED_SANDBOX.name, "codex-auth.json")
+agent.OPENAI_SESSIONS = os.path.join(_CRED_SANDBOX.name, "codex-sessions")
+for _k in ("OPENROUTER_API_KEY", "OLLAMA_API_KEY", "OPENCODE_GO_API_KEY"):
+    os.environ.pop(_k, None)
+
 
 class OpenAIProbeTest(unittest.TestCase):
     def setUp(self):
@@ -206,42 +220,123 @@ class OllamaCloudProbeTest(unittest.TestCase):
         else:
             os.environ["OLLAMA_API_KEY"] = self.old_key
 
-    def test_usage_endpoint_populates_live_session_and_weekly_limits(self):
-        calls = []
-
+    def _fake(self, routes, calls=None):
         def fake_http(method, url, headers=None, body=None):
-            calls.append((method, url, headers))
-            if url.endswith("/api/usage"):
-                return {"limits": {
-                    "session": {"usage": 0.235, "models": []},
-                    "weekly": {"usage": 0.61, "models": []},
-                }}
-            if url.endswith("/api/me"):
-                return {"Plan": "Pro"}
+            if calls is not None:
+                calls.append((method, url, headers))
+            for suffix, value in routes.items():
+                if url.endswith(suffix):
+                    if isinstance(value, Exception):
+                        raise value
+                    return value
             self.fail("unexpected URL: " + url)
+        return fake_http
 
-        agent._http = fake_http
+    def test_credit_plan_renders_as_balance_with_spend_and_renewal(self):
+        calls = []
+        agent._http = self._fake({
+            "/api/balance": {
+                "included": {"balance_usd": 59.93709, "allowance_usd": 60,
+                             "period": {"from": "2026-10-31T18:37:16Z", "until": "2099-12-01T18:37:00Z"}},
+                "purchased": {"balance_usd": 5},
+            },
+            "/api/usage": {"range": "7d", "totals": {"usage_usd": 0.06291},
+                           "buckets": [{"from": "2000-01-01T00:00:00Z", "until": "2000-01-02T00:00:00Z", "usage_usd": 0},
+                                       {"from": "2099-01-01T00:00:00Z", "until": "2099-01-02T00:00:00Z", "usage_usd": 0.01}]},
+            "/api/me": {"Plan": "pro"},
+        }, calls)
+        result = agent.probe_ollama_cloud()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["kind"], "balance")
+        self.assertEqual(result["balance"], 64.94)           # included + purchased
+        self.assertEqual(result["included_balance"], 59.94)
+        self.assertEqual(result["purchased_balance"], 5.0)
+        self.assertEqual(result["spend_month"], 0.06)        # allowance - included balance
+        self.assertEqual(result["spend_week"], 0.06)
+        self.assertEqual(result["spend_today"], 0.01)        # no bucket spans now -> last bucket
+        self.assertEqual(result["month"]["label"], "MONTH")
+        self.assertEqual(result["month"]["pct"], 0.1)
+        self.assertEqual(result["renews_at"], "2099-12-01T18:37:00Z")
+        self.assertEqual(result["plan"], "Pro · $60/mo")
+        self.assertEqual(result["headline"], "$64.94")
+        self.assertNotIn("limit_reached", result)
+        self.assertEqual(calls[0][0:2], ("GET", "https://ollama.com/api/balance"))
+        self.assertEqual(calls[0][2]["Authorization"], "Bearer ollama-test-key")
+
+    def test_spent_credits_flag_limit_reached(self):
+        agent._http = self._fake({
+            "/api/balance": {"included": {"balance_usd": 0, "allowance_usd": 20,
+                                          "period": {"until": "2099-01-01T00:00:00Z"}},
+                             "purchased": {"balance_usd": 0}},
+            "/api/usage": {"totals": {"usage_usd": 20}},
+            "/api/me": {"Plan": "free"},
+        })
+        result = agent.probe_ollama_cloud()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["balance"], 0.0)
+        self.assertEqual(result["month"]["pct"], 100.0)
+        self.assertTrue(result["limit_reached"])
+
+    def test_legacy_plan_session_and_weekly_with_resets(self):
+        agent._http = self._fake({
+            "/api/balance": {"included": {
+                "session": {"remaining_percent": 76.5, "resets_at": "2099-10-01T07:00:00Z"},
+                "weekly": {"remaining_percent": 39, "resets_at": "2099-10-05T00:00:00Z"}},
+                "purchased": {"balance_usd": 25}},
+            "/api/usage": {"totals": {"usage_usd": 1.2}},
+            "/api/me": {"Plan": "pro"},
+        })
+        result = agent.probe_ollama_cloud()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["kind"], "limit")
+        self.assertEqual(result["session"]["pct"], 23.5)
+        self.assertEqual(result["session"]["label"], "5H")
+        self.assertEqual(result["session"]["resets_at"], "2099-10-01T07:00:00Z")
+        self.assertTrue(result["session"]["resets_in"])
+        self.assertEqual(result["week"]["pct"], 61.0)
+        self.assertEqual(result["purchased_balance"], 25.0)
+        self.assertEqual(result["headline"], "PRO")
+
+    def test_balance_outage_falls_back_to_legacy_usage_limits(self):
+        agent._http = self._fake({
+            "/api/balance": OSError("balance unavailable"),
+            "/api/usage": {"limits": {"session": {"usage": 0.235}, "weekly": {"usage": 0.61}}},
+            "/api/me": {"Plan": "Pro"},
+        })
         result = agent.probe_ollama_cloud()
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["session"], {"pct": 23.5, "label": "5H"})
         self.assertEqual(result["week"], {"pct": 61.0, "label": "WEEK"})
-        self.assertEqual(result["headline"], "PRO")
-        self.assertEqual(calls[0][0:2], ("GET", "https://ollama.com/api/usage"))
-        self.assertEqual(calls[0][2]["Authorization"], "Bearer ollama-test-key")
 
-    def test_profile_failure_does_not_hide_usage(self):
-        def fake_http(method, url, headers=None, body=None):
-            if url.endswith("/api/usage"):
-                return {"limits": {"session": {"usage": 0.1}, "weekly": {"usage": 0.2}}}
-            raise OSError("profile unavailable")
+    def test_rejected_key_is_reported_not_hidden(self):
+        err = agent.urllib.error.HTTPError("https://ollama.com/api/balance", 401, "Unauthorized", {}, None)
+        agent._http = self._fake({
+            "/api/balance": err,
+            "/api/usage": {"range": "7d", "totals": {"usage_usd": 0}},
+        })
+        result = agent.probe_ollama_cloud()
 
-        agent._http = fake_http
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "key rejected (401)")
+
+    def test_profile_failure_does_not_hide_credits(self):
+        agent._http = self._fake({
+            "/api/balance": {"included": {"balance_usd": 10, "allowance_usd": 20, "period": {}},
+                             "purchased": {"balance_usd": 0}},
+            "/api/usage": OSError("usage unavailable"),
+            "/api/me": OSError("profile unavailable"),
+        })
         result = agent.probe_ollama_cloud()
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["headline"], "Ollama")
+        self.assertEqual(result["headline"], "$10.00")
+        self.assertEqual(result["plan"], "$20/mo")
         self.assertIn("profile unavailable", result["profile_error"])
+        self.assertIn("usage unavailable", result["usage_error"])
 
 
 class OpenCodeGoProbeTest(unittest.TestCase):
